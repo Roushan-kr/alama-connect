@@ -2,6 +2,7 @@
   "name": "@alumni/api",
   "version": "0.0.1",
   "description": "",
+  "type": "module",
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -35,10 +36,10 @@
     "fastify": "^5.8.5",
     "ioredis": "^5.10.1",
     "jose": "^6.2.3",
+    "nodemailer": "^8.0.7",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.7.284",
     "pino": "^10.3.1",
-    "resend": "^6.12.3",
     "socket.io": "^4.8.3",
     "zod": "^4.4.3"
   },

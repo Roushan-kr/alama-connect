@@ -183,7 +183,7 @@ src/
 │
 ├── services/
 │   ├── storage/           # R2/S3 abstraction (swap providers here)
-│   ├── email/             # SendGrid/Resend abstraction
+│   ├── email/             # nodemailer abstraction
 │   ├── push/              # FCM / Expo push abstraction
 │   └── ai/                # PDF parsing, LLM calls, embeddings
 │
@@ -928,7 +928,7 @@ export const sendNotification = task({
 
 ### No SMS Policy
 
-No SMS to control cost. Rely on push (FCM/Expo) + email (Resend/SendGrid free tier).
+No SMS to control cost. Rely on push (FCM/Expo) + email (nodemailer).
 
 ---
 

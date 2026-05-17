@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -16,6 +17,7 @@
   "license": "ISC",
   "packageManager": "pnpm@10.19.0",
   "dependencies": {
+    "firebase": "^12.13.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

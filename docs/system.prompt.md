@@ -26,7 +26,7 @@ STACK:
 - Background Jobs: Trigger.dev (NOT BullMQ — do not use BullMQ anywhere)
 - File Storage: Cloudflare R2 (S3-compatible API via @aws-sdk/client-s3)
 - Realtime: Socket.IO with Redis adapter
-- Email: Resend (or SendGrid) via abstraction layer in src/services/email/
+- Email: nodemailer (or SendGrid) via abstraction layer in src/services/email/
 - Push: FCM via abstraction layer in src/services/push/
 
 ARCHITECTURE RULES (follow strictly):
@@ -114,7 +114,7 @@ Implement in this EXACT order (do not skip ahead):
 STEP 1.1 — Project Scaffold
 Create the Next.js 14 project with App Router. Install all dependencies:
   prisma, @prisma/client, ioredis, @trigger.dev/sdk, @aws-sdk/client-s3,
-  argon2, jsonwebtoken, zod, socket.io, socket.io-adapter-redis, resend,
+  argon2, jsonwebtoken, zod, socket.io, socket.io-adapter-redis, nodemailer,
   react-query, zustand, react-hook-form, tailwindcss, typescript
 Set up tsconfig, tailwind config, and .env.example with all required variables.
 Create src/config/env.ts that validates env vars with Zod on startup.
