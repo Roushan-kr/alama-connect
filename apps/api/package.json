@@ -6,15 +6,17 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "tsc --project tsconfig.build.json",
     "start": "node dist/index.js",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --project tsconfig.build.json --noEmit",
     "clean": "rm -rf dist",
-    "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
-    "db:seed": "tsx scripts/cli/seed-network.ts"
+    "db:generate": "prisma generate --config prisma.config.ts",
+    "db:migrate": "prisma migrate dev --config prisma.config.ts",
+    "db:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
+    "db:studio": "prisma studio --config prisma.config.ts",
+    "db:seed": "tsx scripts/cli/seed-network.ts",
+    "db:seed:admin": "tsx scripts/cli/seed-admin.ts"
   },
   "keywords": [],
   "author": "",
@@ -46,6 +48,7 @@
   "devDependencies": {
     "@types/node": "^25.8.0",
     "@types/pdf-parse": "^1.1.5",
+    "dotenv": "^16.6.1",
     "eslint": "^10.4.0",
     "prettier": "^3.8.3",
     "prisma": "^7.8.0",

@@ -1,0 +1,704 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Alumni Networking Platform — Prisma Schema
+// Architecture: alumni-platform-architecture.md v2.0
+// Covers:  Phase 1 (Auth/Identity) → Phase 6 (Launch Hardening)
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum GlobalRole {
+  USER
+  SUPER_ADMIN
+}
+
+enum NetworkRole {
+  STUDENT
+  ALUMNI
+  FACULTY
+  ADMIN
+}
+
+enum MemberStatus {
+  PENDING
+  UNDER_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationMethod {
+  ENTRY_NUMBER
+  DOCUMENT_UPLOAD
+}
+
+enum ContentType {
+  SOCIAL_POST
+  ANNOUNCEMENT
+  PDF_NOTICE
+  NEWSLETTER
+  EVENT
+  JOB
+}
+
+enum ContentVisibility {
+  PUBLIC
+  NETWORK
+  GROUP
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+}
+
+enum ConnectionStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum ConvRole {
+  MEMBER
+  ADMIN
+}
+
+enum GroupRole {
+  MEMBER
+  MODERATOR
+  ADMIN
+}
+
+enum NotificationType {
+  CONNECTION_REQUEST
+  CONNECTION_ACCEPTED
+  POST_LIKED
+  POST_COMMENTED
+  POST_MENTIONED
+  GROUP_ADDED
+  NEW_MESSAGE
+  ACCOUNT_VERIFIED
+  ACCOUNT_REJECTED
+  ANNOUNCEMENT
+  NEWSLETTER
+}
+
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  EMAIL
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1 — CORE IDENTITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Platform user account.  Password is hashed with Argon2id.
+model User {
+  userId        String     @id @default(uuid()) @map("user_id") @db.Uuid
+  email         String     @unique
+  /// Unique handle (e.g. 'john_doe') for @mentions and profile URLs.
+  username      String     @unique
+  passwordHash  String     @map("password_hash")
+  globalRole    GlobalRole @default(USER) @map("global_role")
+  emailVerified Boolean    @default(false) @map("email_verified")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime   @updatedAt @map("updated_at") @db.Timestamptz
+
+  // Relations
+  profile              Profile?
+  sessions             Session[]
+  networkMemberships   NetworkMember[]
+  verificationRequests VerificationRequest[]
+  educations           Education[]
+  workExperiences      WorkExperience[]
+  userSkills           UserSkill[]
+  certifications       Certification[]
+  // Content
+  createdContent       Content[]            @relation("ContentAuthor")
+  postLikes            PostLike[]
+  postComments         PostComment[]
+  // Social
+  following            Follow[]             @relation("Follower")
+  followers            Follow[]             @relation("Followee")
+  connectionRequestsSent     ConnectionRequest[] @relation("FromUser")
+  connectionRequestsReceived ConnectionRequest[] @relation("ToUser")
+  connectionsAsA         Connection[]        @relation("UserA")
+  connectionsAsB         Connection[]        @relation("UserB")
+  // Groups
+  groupMemberships     GroupMember[]
+  createdGroups        Group[]              @relation("GroupCreator")
+  // Messaging
+  conversationMembers  ConversationMember[]
+  sentMessages         Message[]            @relation("MessageSender")
+  messageReads         MessageRead[]
+  // Notifications
+  notifications        Notification[]
+  notificationPrefs    NotificationPref[]
+  // Jobs
+  postedJobs           Job[]
+  // Admin
+  reviewedVerifications VerificationRequest[] @relation("ReviewedBy")
+  // Location (geo, future)
+  userLocation         UserLocation?
+  // Settings
+  userSettings         UserSettings?
+
+  @@map("users")
+}
+
+/// Extended profile data — 1-to-1 with User.
+model Profile {
+  userId       String   @id @map("user_id") @db.Uuid
+  fullName     String?  @map("full_name")
+  headline     String?
+  bio          String?
+  country      String?
+  state        String?
+  city         String?
+  locality     String?
+  profileImage String?  @map("profile_image")
+  linkedinUrl  String?  @map("linkedin_url")
+  publicEmail  String?  @map("public_email")
+  /// Maintained via Postgres trigger or on-write update.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("profiles")
+}
+
+/// Server-side refresh token sessions.  Omit if JWT-only (stateless).
+model Session {
+  sessionId String   @id @default(uuid()) @map("session_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1 — EDUCATIONAL IDENTITY
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// University / Campus network.  Provisioned via CLI seed script only.
+model Network {
+  networkId      String   @id @default(uuid()) @map("network_id") @db.Uuid
+  name           String
+  /// Short unique code, e.g. "PTU"
+  code           String   @unique
+  logoUrl        String?  @map("logo_url")
+  /// Allowed email domains, e.g. ["ptu.ac.in"]
+  allowedDomains String[] @map("allowed_domains")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  // Relations
+  members              NetworkMember[]
+  verificationRequests VerificationRequest[]
+  educations           Education[]
+  content              Content[]
+  groups               Group[]
+  jobs                 Job[]
+  notifications        Notification[]
+
+  @@map("networks")
+}
+
+/// Junction: user membership in a network with role + verification status.
+model NetworkMember {
+  userId    String       @map("user_id") @db.Uuid
+  networkId String       @map("network_id") @db.Uuid
+  role      NetworkRole  @default(STUDENT)
+  status    MemberStatus @default(PENDING)
+  joinedAt  DateTime     @default(now()) @map("joined_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  network Network @relation(fields: [networkId], references: [networkId], onDelete: Cascade)
+
+  @@id([userId, networkId])
+  @@index([networkId, status])
+  @@map("network_members")
+}
+
+/// Admin reviews a verification request before granting VERIFIED status.
+model VerificationRequest {
+  reqId        String             @id @default(uuid()) @map("req_id") @db.Uuid
+  userId       String             @map("user_id") @db.Uuid
+  networkId    String             @map("network_id") @db.Uuid
+  method       VerificationMethod
+  entryNumber  String?            @map("entry_number")
+  /// R2 path (private, never a public URL).
+  documentUrl  String?            @map("document_url")
+  status       MemberStatus       @default(PENDING)
+  adminNotes   String?            @map("admin_notes")
+  submittedAt  DateTime           @default(now()) @map("submitted_at") @db.Timestamptz
+  reviewedAt   DateTime?          @map("reviewed_at") @db.Timestamptz
+  reviewedBy   String?            @map("reviewed_by") @db.Uuid
+
+  user     User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  network  Network @relation(fields: [networkId], references: [networkId], onDelete: Cascade)
+  reviewer User?   @relation("ReviewedBy", fields: [reviewedBy], references: [userId])
+
+  @@index([networkId, status])
+  @@index([userId])
+  @@map("verification_requests")
+}
+
+/// User's education entries; is_verified = true after admin approval.
+model Education {
+  eduId      String   @id @default(uuid()) @map("edu_id") @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  networkId  String   @map("network_id") @db.Uuid
+  degree     String?
+  field      String?
+  startYear  Int?     @map("start_year") @db.SmallInt
+  endYear    Int?     @map("end_year") @db.SmallInt
+  isVerified Boolean  @default(false) @map("is_verified")
+
+  user    User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  network Network @relation(fields: [networkId], references: [networkId])
+
+  @@index([userId])
+  @@map("educations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 1 — PROFESSIONAL LAYER
+// ─────────────────────────────────────────────────────────────────────────────
+
+model WorkExperience {
+  expId       String    @id @default(uuid()) @map("exp_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  title       String
+  company     String
+  location    String?
+  startDate   DateTime  @map("start_date") @db.Date
+  /// NULL means current position.
+  endDate     DateTime? @map("end_date") @db.Date
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("work_experiences")
+}
+
+/// Global skill catalogue (normalised).
+model Skill {
+  skillId Int    @id @default(autoincrement()) @map("skill_id")
+  name    String @unique
+
+  userSkills UserSkill[] // help search 
+
+  @@map("skills")
+}
+
+/// Many-to-many: user ↔ skill.
+model UserSkill {
+  userId  String @map("user_id") @db.Uuid
+  skillId Int    @map("skill_id")
+
+  user  User  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  skill Skill @relation(fields: [skillId], references: [skillId], onDelete: Cascade)
+
+  @@id([userId, skillId])
+  @@map("user_skills")
+}
+
+model Certification {
+  certId  String @id @default(uuid()) @map("cert_id") @db.Uuid
+  userId  String @map("user_id") @db.Uuid
+  name    String
+  issuer  String
+  year    Int?   @db.SmallInt
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("certifications")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — UNIFIED CONTENT TABLE (Single Table Inheritance)
+// All feed items: SOCIAL_POST, ANNOUNCEMENT, PDF_NOTICE, NEWSLETTER, EVENT, JOB
+// Type-specific fields live in the `meta` JSONB column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Unified feed content — Single Table Inheritance via contentType discriminator.
+/// meta JSONB shape per contentType:
+///   SOCIAL_POST  → { tags: string[] }
+///   JOB          → { apply_link: string, location: string, expires_at: string }
+///   PDF_NOTICE   → { page_count: number, file_size_kb: number, pdf_text: string }
+///   NEWSLETTER   → { edition: string, recipient_count: number }
+///   EVENT        → { event_date: string, venue: string, rsvp_link: string }
+///   ANNOUNCEMENT → {} (no extra fields)
+model Content {
+  contentId    String            @id @default(uuid()) @map("content_id") @db.Uuid
+  networkId    String            @map("network_id") @db.Uuid
+  groupId      String?           @map("group_id") @db.Uuid
+  contentType  ContentType       @map("content_type")
+  title        String?
+  body         String?
+  /// R2 path for PDF_NOTICE / NEWSLETTER files.
+  fileUrl      String?           @map("file_url")
+  /// Generated preview thumbnail URL (filled async by Trigger.dev PDF task).
+  previewUrl   String?           @map("preview_url")
+  /// Parsed hashtags and topic/group tags (e.g. ['#tpc-placement', '#grp-science'])
+  tags         String[]          @default([])
+  /// Type-specific fields (see JSDoc above).
+  meta         Json              @default("{}")
+  /// GIN indexed: title + body + tags + PDF text (updated on write + triggers).
+  searchVector Unsupported("tsvector")? @map("search_vector")
+  createdBy    String            @map("created_by") @db.Uuid
+  visibility   ContentVisibility @default(NETWORK)
+  isPinned     Boolean           @default(false) @map("is_pinned")
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  network Network  @relation(fields: [networkId], references: [networkId])
+  group   Group?   @relation(fields: [groupId], references: [groupId])
+  author  User     @relation("ContentAuthor", fields: [createdBy], references: [userId])
+
+  // Child relations
+  media    PostMedia[]
+  likes    PostLike[]
+  comments PostComment[]
+  job      Job?
+
+  // Indexes match architecture doc exactly
+  /// idx_content_network_created
+  @@index([networkId, createdAt(sort: Desc)])
+  /// idx_content_group
+  @@index([groupId, createdAt(sort: Desc)])
+  /// idx_content_type
+  @@index([contentType, networkId])
+  /// Blazing fast hashtag/mention queries using PostgreSQL GIN index
+  @@index([tags], type: Gin)
+  @@map("content")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — SOCIAL LAYER
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Media (images/video) attached to a SOCIAL_POST content row.
+model PostMedia {
+  mediaId      String    @id @default(uuid()) @map("media_id") @db.Uuid
+  contentId    String    @map("content_id") @db.Uuid
+  url          String
+  mediaType    MediaType @map("media_type")
+  displayOrder Int       @default(0) @map("display_order") @db.SmallInt
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  content Content @relation(fields: [contentId], references: [contentId], onDelete: Cascade)
+
+  @@index([contentId])
+  @@map("post_media")
+}
+
+/// Likes on any content row.
+model PostLike {
+  userId    String   @map("user_id") @db.Uuid
+  contentId String   @map("content_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  user    User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  content Content @relation(fields: [contentId], references: [contentId], onDelete: Cascade)
+
+  @@id([userId, contentId])
+  @@index([contentId])
+  @@map("post_likes")
+}
+
+/// Nested threaded comments on any content row.
+model PostComment {
+  commentId String   @id @default(uuid()) @map("comment_id") @db.Uuid
+  contentId String   @map("content_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// NULL = top-level comment; set for nested replies.
+  parentId  String?  @map("parent_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  content Content      @relation(fields: [contentId], references: [contentId], onDelete: Cascade)
+  user    User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  parent  PostComment? @relation("CommentThread", fields: [parentId], references: [commentId])
+  replies PostComment[] @relation("CommentThread")
+
+  @@index([contentId])
+  @@index([parentId])
+  @@map("post_comments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — CONNECTIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One-way follow (no approval required).
+model Follow {
+  followerId String   @map("follower_id") @db.Uuid
+  followeeId String   @map("followee_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  follower User @relation("Follower", fields: [followerId], references: [userId], onDelete: Cascade)
+  followee User @relation("Followee", fields: [followeeId], references: [userId], onDelete: Cascade)
+
+  @@id([followerId, followeeId])
+  @@index([followeeId])
+  @@map("follows")
+}
+
+/// Mutual connection request flow.
+model ConnectionRequest {
+  reqId     String           @id @default(uuid()) @map("req_id") @db.Uuid
+  fromUser  String           @map("from_user") @db.Uuid
+  toUser    String           @map("to_user") @db.Uuid
+  status    ConnectionStatus @default(PENDING)
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  from User @relation("FromUser", fields: [fromUser], references: [userId], onDelete: Cascade)
+  to   User @relation("ToUser", fields: [toUser], references: [userId], onDelete: Cascade)
+
+  @@unique([fromUser, toUser])
+  @@index([toUser, status])
+  @@map("connection_requests")
+}
+
+/// Accepted mutual connections.
+/// RULE: always store (userA, userB) where userA < userB lexicographically.
+/// This enforces uniqueness and simplifies lookups.
+model Connection {
+  userA       String   @map("user_a") @db.Uuid
+  userB       String   @map("user_b") @db.Uuid
+  connectedAt DateTime @default(now()) @map("connected_at") @db.Timestamptz
+
+  a User @relation("UserA", fields: [userA], references: [userId], onDelete: Cascade)
+  b User @relation("UserB", fields: [userB], references: [userId], onDelete: Cascade)
+
+  @@id([userA, userB])
+  @@index([userB])
+  @@map("connections")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  notifId   String           @id @default(uuid()) @map("notif_id") @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  networkId String?          @map("network_id") @db.Uuid
+  type      NotificationType
+  /// Polymorphic reference: content_id, msg_id, user_id, etc.
+  relatedId String?          @map("related_id") @db.Uuid
+  message   String
+  link      String?
+  readAt    DateTime?        @map("read_at") @db.Timestamptz
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  user    User     @relation(fields: [userId], references: [userId], onDelete: Cascade)
+  network Network? @relation(fields: [networkId], references: [networkId])
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+/// Per-user notification channel preferences.
+model NotificationPref {
+  userId    String              @map("user_id") @db.Uuid
+  notifType String              @map("notif_type")
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([userId, notifType, channel])
+  @@map("notification_prefs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 3 — JOBS SYSTEM
+// Jobs are first-class Content (type=JOB) AND have a companion jobs row
+// for structured filter queries.  expires_at drives nightly Trigger.dev cleanup.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Job {
+  jobId       String    @id @default(uuid()) @map("job_id") @db.Uuid
+  contentId   String    @unique @map("content_id") @db.Uuid
+  postedBy    String    @map("posted_by") @db.Uuid
+  networkId   String    @map("network_id") @db.Uuid
+  title       String
+  description String?
+  location    String?
+  applyLink   String?   @map("apply_link")
+  tags        String[]  @default([])
+  expiresAt   DateTime? @map("expires_at") @db.Timestamptz
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  content Content @relation(fields: [contentId], references: [contentId], onDelete: Cascade)
+  poster  User    @relation(fields: [postedBy], references: [userId])
+  network Network @relation(fields: [networkId], references: [networkId])
+
+  @@index([networkId, expiresAt])
+  @@index([tags], type: Gin)
+  @@map("jobs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 4 — GROUPS
+// Group posts = Content rows where group_id IS NOT NULL AND visibility = 'GROUP'
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Group {
+  groupId     String   @id @default(uuid()) @map("group_id") @db.Uuid
+  networkId   String   @map("network_id") @db.Uuid
+  name        String
+  description String?
+  isPrivate   Boolean  @default(true) @map("is_private")
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  network  Network       @relation(fields: [networkId], references: [networkId])
+  creator  User          @relation("GroupCreator", fields: [createdBy], references: [userId])
+  members  GroupMember[]
+  content  Content[]
+
+  @@index([networkId])
+  @@map("groups")
+}
+
+model GroupMember {
+  groupId  String    @map("group_id") @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz
+
+  group Group @relation(fields: [groupId], references: [groupId], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([groupId, userId])
+  @@map("group_members")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 4 — MESSAGING
+// Only connected users (Connection row exists) can start 1:1 convs.
+// messages.expiresAt = sentAt + 60 days (set in application layer).
+// Nightly Trigger.dev task soft-deletes expired messages.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Conversation {
+  convId    String   @id @default(uuid()) @map("conv_id") @db.Uuid
+  isGroup   Boolean  @default(false) @map("is_group")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  members  ConversationMember[]
+  messages Message[]
+
+  @@map("conversations")
+}
+
+model ConversationMember {
+  convId   String   @map("conv_id") @db.Uuid
+  userId   String   @map("user_id") @db.Uuid
+  role     ConvRole @default(MEMBER)
+  joinedAt DateTime @default(now()) @map("joined_at") @db.Timestamptz
+
+  conversation Conversation @relation(fields: [convId], references: [convId], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([convId, userId])
+  @@index([userId])
+  @@map("conversation_members")
+}
+
+/// 60-day retention: nightly Trigger.dev task sets isDeleted=true where expiresAt < NOW().
+model Message {
+  msgId     String   @id @default(uuid()) @map("msg_id") @db.Uuid
+  convId    String   @map("conv_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  body      String
+  sentAt    DateTime @default(now()) @map("sent_at") @db.Timestamptz
+  /// Set to sentAt + 60 days in application layer on insert.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz
+  isDeleted Boolean  @default(false) @map("is_deleted")
+
+  conversation Conversation @relation(fields: [convId], references: [convId], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [userId])
+  reads        MessageRead[]
+
+  @@index([convId, sentAt(sort: Desc)])
+  @@index([expiresAt])
+  @@map("messages")
+}
+
+model MessageRead {
+  msgId  String   @map("msg_id") @db.Uuid
+  userId String   @map("user_id") @db.Uuid
+  readAt DateTime @default(now()) @map("read_at") @db.Timestamptz
+
+  message Message @relation(fields: [msgId], references: [msgId], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@id([msgId, userId])
+  @@map("message_reads")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 6 — GEO LAYER (future-ready, PostGIS)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Stores user's location for future alumni geo-density map.
+/// geom column uses PostGIS GIST index; raw SQL required for spatial queries.
+model UserLocation {
+  userId      String   @id @map("user_id") @db.Uuid
+  latitude    Float?
+  longitude   Float?
+  /// PostGIS Point geometry — managed via raw SQL / triggers.
+  geom        Unsupported("geometry(Point, 4326)")?
+  addressText String?  @map("address_text")
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("user_locations")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 6 — USER SETTINGS (push tokens, onboarding, GDPR)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Misc per-user settings that don't belong on the profile.
+model UserSettings {
+  userId               String    @id @map("user_id") @db.Uuid
+  /// FCM token for push notifications.
+  fcmToken             String?   @map("fcm_token")
+  onboardingCompleted  Boolean   @default(false) @map("onboarding_completed")
+  /// Set to true when account deletion was requested; hard-delete after 30d.
+  deletionRequestedAt  DateTime? @map("deletion_requested_at") @db.Timestamptz
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@map("user_settings")
+}

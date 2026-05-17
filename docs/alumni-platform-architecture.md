@@ -725,7 +725,14 @@ Response:
 | `#grp-<groupTag>` | Group mention                     |
 | `@username`       | User mention → notification       |
 
-Tags are parsed at post creation time and stored in `meta.tags` array for fast filter queries.
+Tags are parsed at content creation time (posts, jobs, notices, etc.) and stored directly in the top-level, GIN-indexed `tags` array column on the `content` table. 
+
+This architectural decision enables a unified, lightning-fast cross-context filter query when a user clicks a tag or topic. A single GIN-index-assisted query filters all visible posts:
+- **Public** (`visibility = 'PUBLIC'`)
+- **Network** (`visibility = 'NETWORK'` for the user's verified network)
+- **Group** (`visibility = 'GROUP'` for any groups where the user is an active member)
+
+Additionally, the PostgreSQL `tsvector` auto-update triggers index the `tags` array to make standard text search (e.g., searching for "placement" or "tpc-placement") instant.
 
 ---
 
