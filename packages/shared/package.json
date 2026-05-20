@@ -18,9 +18,11 @@
   "packageManager": "pnpm@10.19.0",
   "dependencies": {
     "firebase": "^12.13.0",
+    "luxon": "^3.7.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/luxon": "^3.7.1",
     "typescript": "^6.0.3"
   }
 }
