@@ -5,6 +5,7 @@
     "moduleResolution": "nodenext",
     "lib": ["esnext"],
     "types": ["node"],
+    "rootDir": "../../",
     "outDir": "./dist",
     "paths": {
       "@alumni/shared": ["../../packages/shared/src/index.ts"]

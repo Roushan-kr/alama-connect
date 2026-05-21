@@ -17,6 +17,7 @@ import { logger } from "./config/logger.js"
 import { authRouter } from "./modules/auth/router.js"
 import { verificationRouter } from "./modules/verification/router.js"
 import { usersRouter } from "./modules/users/router.js"
+import { nowISO } from "@alumni/shared"
 
 /**
  * Build and configure the Fastify app.
@@ -79,7 +80,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     return reply.status(200).send({
       status: "ok",
       uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
+      timestamp: nowISO(),
     })
   })
 
