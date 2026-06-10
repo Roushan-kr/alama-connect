@@ -277,151 +277,74 @@ MILESTONE CHECK:
 
 ```
 Phase 2 is complete. Starting Phase 3: Professional Features.
+## PHASE 3 PROMPT — Jobs, Groups & Messaging
+*(Use after Phase 2 milestone check passes)*
 
-GOAL: Jobs module, full-text search, admin analytics, announcements, newsletter.
+```
+Phase 2 is complete. Starting Phase 3: Jobs, Groups & Messaging.
 
-STEP 3.1 — Jobs Schema
-Add to Prisma: jobs table (referencing content)
-Migration name: 004_jobs
-Jobs must have: expires_at field. The content row meta JSONB must include apply_link and expires_at.
+GOAL: Backend APIs, Socket.IO gateway, Trigger.dev cleanups, and Frontend pages for Jobs, Groups, and Chat.
 
-STEP 3.2 — Jobs Module
-  - POST /api/jobs (create job: content row type=JOB + jobs row)
-  - GET  /api/jobs?cursor=&limit=20&location=&tags= (filtered listing)
-  - GET  /api/jobs/:job_id
-  - POST /api/admin/jobs/:job_id/remove (admin only)
-Feed integration: jobs appear in global feed as JOB type cards.
-Create tasks/jobs.tasks.ts:
-  - expireOldJobs: scheduled Trigger.dev task, runs at 03:00 daily
-    Sets content visibility='hidden' for jobs where meta->>'expires_at' < NOW()
+STEP 3.1 — Jobs Module
+  - Zod validation schemas in src/modules/jobs/schemas.ts
+  - createJob, listJobs, getJob, deleteJob services in src/modules/jobs/service.ts (transaction for content + job rows, soft-delete visibility GROUP)
+  - POST/GET/DELETE routes in src/modules/jobs/router.ts
 
-STEP 3.3 — Full-Text Search
-Add tsvector columns to profiles and content via migration: 005_search_indexes
-  profiles.search_vector: GIN index
-  content.search_vector: GIN index (already in schema, add if missing)
-Create Postgres function/trigger to auto-update search_vector on profile upsert.
-For content, search_vector is updated by the API on write (and by PDF task when PDF text extracted).
+STEP 3.2 — Groups Module
+  - CreateGroupSchema, UpdateGroupSchema, InviteMemberSchema in src/modules/groups/schemas.ts
+  - createGroup, listGroups, getGroup, joinGroup, inviteMember, removeMember, updateGroup, deleteGroup services in src/modules/groups/service.ts
+  - Group routes in src/modules/groups/router.ts
+  - Extend global feed endpoints and schemas to support optional group filtering (groupId) and namespace cache keys.
 
-Implement src/modules/search/:
-  - GET /api/search?type=users&q=&year=&city=&skills=&cursor=&limit=20
-  - GET /api/search?type=content&q=&content_type=&cursor=&limit=20
-  Both use: WHERE search_vector @@ plainto_tsquery('english', $1)
-  Cache popular queries: search:{sha256_of_params} TTL 300s
+STEP 3.3 — Messaging Module
+  - CreateConversationSchema, SendMessageSchema, ListMessagesSchema in src/modules/messaging/schemas.ts
+  - getOrCreateConversation, sendMessage, listMessages, listConversations, markRead services in src/modules/messaging/service.ts
+  - Messaging routes in src/modules/messaging/router.ts
+  - Socket.IO gateway setup in src/socket/index.ts implementing handshake JWT auth, Redis bridge mapping for notifications, and database-driven connection joins.
 
-STEP 3.4 — Admin Analytics
-  - GET /api/admin/analytics/overview
-    Returns: { total_users, verified_users, pending_verifications, posts_today, active_jobs }
-  - GET /api/admin/analytics/growth?period=30d
-    Returns: daily user registration counts for the period
+STEP 3.4 — Nightly Cleanup Task (Trigger.dev)
+  - soft-delete expired messages, hard-delete expired jobs, and hard-delete 30-day pending account deletions in src/tasks/cleanup.ts.
 
-STEP 3.5 — Announcements
-  - POST /api/admin/announcements
-    Creates content row (type=ANNOUNCEMENT), fires Trigger.dev task to notify all network members
-  - Admin announcement appears at top of feed (is_pinned=true)
-  Create tasks/announcement.tasks.ts:
-    - notifyNetworkAnnouncement: batch-notifies all verified network members (in-app only, paginated batches of 500)
-
-STEP 3.6 — Newsletter
-  - POST /api/admin/newsletter
-    Body: { subject, body_html, recipient_filter? }
-    Creates NEWSLETTER content row
-    Fires Trigger.dev task: sendNewsletterEmails
-  Create tasks/email.tasks.ts → sendNewsletterEmails:
-    - Fetches all verified users in network with email notifications enabled
-    - Sends in batches of 100 with 1s delay between batches (rate limit protection)
-    - Logs send count and failures to Trigger.dev dashboard
+STEP 3.5 — Frontend UI Views
+  - Jobs board dashboard page with tags/location filters and posting modal.
+  - Group catalog dashboard page & group details space page.
+  - Direct messaging thread dashboard page.
 
 MILESTONE CHECK:
-□ POST /api/jobs creates both jobs row and content row with correct meta JSONB
-□ Expired jobs (expires_at past) disappear from feed after nightly task runs
-□ GET /api/search?type=users&q=computer uses tsvector, no LIKE query in SQL
-□ Admin analytics endpoint returns correct counts
-□ Admin can post announcement that appears pinned in feed
-□ Newsletter task sends emails in batches without hitting rate limits
-□ Trigger.dev scheduled tasks appear in dashboard
+□ Jobs created with Content and companion tables correctly
+□ Groups can be joined or updated by administrators
+□ DM threads operate in real-time across Socket.IO
+□ Nightly task soft-deletes expired DMs successfully
 ```
 
 ---
 
-## PHASE 4 PROMPT — Groups & Messaging
+## PHASE 4 PROMPT — Real-time Presence, Search & Announcements
 *(Use after Phase 3 milestone check passes)*
 
 ```
-Phase 3 is complete. Starting Phase 4: Groups & Messaging.
+Phase 3 is complete. Starting Phase 4: Real-time Presence, Search & Announcements.
 
-GOAL: Private groups with group-only posts, mutual connections, real-time text chat.
+GOAL: Real-time user presence tracking in Redis, Full-Text Search, Admin analytics, Announcements and Newsletters.
 
-STEP 4.1 — Groups Schema
-Add to Prisma: groups, group_members
-Migration: 006_groups
-Group posts are content rows with group_id set and visibility='group'.
+STEP 4.1 — Connections & Follows
+  - POST/accept/decline connection requests in src/modules/connections/
+  - Enforce connections table sorting (userA < userB).
 
-STEP 4.2 — Groups Module
-  - POST /api/groups (create group, creator becomes admin)
-  - GET  /api/groups?network_id= (list groups user can see)
-  - GET  /api/groups/:group_id (group detail + member count)
-  - POST /api/groups/:group_id/join (for public groups)
-  - POST /api/groups/:group_id/invite/:user_id (admin only)
-  - GET  /api/groups/:group_id/feed?cursor=&limit=20 (group-scoped content)
-  Group feed: same content table query, WHERE group_id = ? AND visibility = 'group'
-  Group feed cache: feed:group:{group_id}:{cursor} TTL 60s
+STEP 4.2 — Full-Text Search
+  - tsvector columns to profiles and content via GIN index.
+  - Update search_vector via Postgres functions and triggers.
+  - GET /api/search API endpoint for users/contents.
 
-STEP 4.3 — Connections Module
-Schema already designed. Implement:
-  - POST   /api/connections/request { to_user_id }
-    → INSERT connection_requests, fire Trigger.dev notification task
-  - POST   /api/connections/accept { req_id }
-    → INSERT connections(min(a,b), max(a,b)), DELETE request, notify requester
-  - POST   /api/connections/decline { req_id }
-  - DELETE /api/connections/:user_id (remove connection)
-  - GET    /api/connections/requests/incoming (pending requests for me)
-  - GET    /api/connections?cursor=&limit=20 (my connections list)
-CRITICAL: connections table insert must enforce (user_a < user_b). Use: min/max on UUIDs before insert.
+STEP 4.3 — Socket.IO Presence
+  - Redis presence tracking: presence:{userId}:online TTL updates on websocket ping/pong.
 
-STEP 4.4 — Messaging Schema
-Add to Prisma: conversations, conversation_members, messages, message_reads
-Migration: 007_messaging
-messages.expires_at = sent_at + INTERVAL '60 days' (set in application layer, not DB default)
+STEP 4.4 — Admin Analytics & Announcements
+  - GET /api/admin/analytics/overview
+  - POST /api/admin/announcements (pins to top, triggers Trigger.dev notifyNetworkAnnouncement)
 
-STEP 4.5 — Socket.IO Setup
-Create src/socket/server.ts:
-  - Initialize Socket.IO with Redis adapter (socket.io-adapter-redis)
-  - On connection: validate JWT from handshake.auth.token
-  - If invalid token: disconnect immediately
-  - On connect: join room user:{user_id} for personal notifications
-  - On message.send: validate sender is conversation member → save to DB → publish to Redis → emit to room
-  - On message.read: update message_reads → publish read_ack
-
-Create src/socket/events.ts: typed event definitions (no magic strings)
-
-STEP 4.6 — Messaging API
-  - POST /api/conversations (start 1:1: requires existing connection between users)
-  - GET  /api/conversations (list my conversations, sorted by last_message_at)
-  - GET  /api/conversations/:conv_id/messages?cursor=&limit=30 (history, keyset)
-  - Only connected users (check connections table) can start 1:1 chat
-  - Group conversations can be created from group (admin only)
-
-STEP 4.7 — Message Expiry Task
-Create tasks/messaging.tasks.ts:
-  - cleanExpiredMessages: scheduled daily at 02:00
-    UPDATE messages SET is_deleted=true, body='[Message expired]' WHERE expires_at < NOW() AND is_deleted=false
-
-STEP 4.8 — Connection Notifications (Socket.IO real-time)
-When a connection is accepted:
-  1. Trigger.dev task creates in-app notification
-  2. Also publish to Redis: user:{requester_id}:notif
-  3. Socket.IO server, subscribed via Redis adapter, emits to requester if online
-
-MILESTONE CHECK:
-□ Group creation and membership work
-□ Group feed only shows content with matching group_id
-□ Connection request → accept → connections row has user_a < user_b always
-□ Only connected users can start a conversation
-□ Socket.IO connection rejected if JWT invalid
-□ Messages persist in DB with correct expires_at (60 days from sent_at)
-□ Nightly task soft-deletes expired messages
-□ Real-time message delivery tested with two browser tabs
-□ Redis adapter enables message delivery across hypothetical multiple server instances
+STEP 4.5 — newsletters
+  - POST /api/admin/newsletter (triggers Trigger.dev bulk rate-limited emails)
 ```
 
 ---
@@ -665,45 +588,41 @@ Debug this systematically:
 *(Update this after every completed task. Use [x] for done, [ ] for pending, [~] for in progress)*
 
 ### Phase 1 — Foundation
-- [ ] 1.1 Project scaffold + dependencies
-- [ ] 1.2 Database schema (Phase 1 tables)
-- [ ] 1.3 CLI seed scripts
-- [ ] 1.4 Auth module (register, confirm, login, refresh, logout)
-- [ ] 1.5 File upload service (R2 + virus scan)
-- [ ] 1.6 Verification module (submit, admin review)
-- [ ] 1.7 Basic profile module
-- [ ] 1.8 Trigger.dev setup + email tasks
-- [ ] **Phase 1 Milestone Check**
+- [x] 1.1 Project scaffold + dependencies
+- [x] 1.2 Database schema (Phase 1 tables)
+- [x] 1.3 CLI seed scripts
+- [x] 1.4 Auth module (register, confirm, login, refresh, logout)
+- [x] 1.5 File upload service (R2 + virus scan)
+- [x] 1.6 Verification module (submit, admin review)
+- [x] 1.7 Basic profile module
+- [x] 1.8 Trigger.dev setup + email tasks
+- [x] **Phase 1 Milestone Check**
 
 ### Phase 2 — Social Core
-- [ ] 2.1 Content table migration
-- [ ] 2.2 Feed module (create post, global feed, keyset pagination, cache)
-- [ ] 2.3 Feed Trigger.dev tasks (invalidation, mention processing, hashtags)
-- [ ] 2.4 Post media (image upload + attach)
-- [ ] 2.5 Likes and comments
-- [ ] 2.6 Follow system
-- [ ] 2.7 Notification foundation (table + in-app CRUD)
-- [ ] 2.8 Profile enhancement (work, skills, education)
-- [ ] **Phase 2 Milestone Check**
+- [x] 2.1 Content table migration
+- [x] 2.2 Feed module (create post, global feed, keyset pagination, cache)
+- [x] 2.3 Feed Trigger.dev tasks (invalidation, mention processing, hashtags)
+- [x] 2.4 Post media (image upload + attach)
+- [x] 2.5 Likes and comments
+- [x] 2.6 Follow system
+- [x] 2.7 Notification foundation (table + in-app CRUD)
+- [x] 2.8 Profile enhancement (work, skills, education)
+- [x] **Phase 2 Milestone Check**
 
-### Phase 3 — Professional Features
-- [ ] 3.1 Jobs schema migration
-- [ ] 3.2 Jobs module (create, list, filter, expiry task)
-- [ ] 3.3 Full-text search (tsvector, GIN, search API)
-- [ ] 3.4 Admin analytics
-- [ ] 3.5 Announcements (admin post + batch notify task)
-- [ ] 3.6 Newsletter (bulk email task)
-- [ ] **Phase 3 Milestone Check**
+### Phase 3 — Jobs, Groups & Messaging
+- [x] 3.1 Jobs and Groups schema migrations
+- [x] 3.2 Jobs module & dashboard UI (create, list, filter)
+- [x] 3.3 Groups module & spaces UI (CRUD, membership, group feeds)
+- [x] 3.4 messaging module & chat UI (DMs, Socket.IO gateways, message reads)
+- [x] 3.5 Cleanup nightly task (soft/hard deletion schedules)
+- [x] **Phase 3 Milestone Check**
 
-### Phase 4 — Groups & Messaging
-- [ ] 4.1 Groups schema migration
-- [ ] 4.2 Groups module (CRUD, membership, group feed)
-- [ ] 4.3 Connections module (request, accept, decline)
-- [ ] 4.4 Messaging schema migration
-- [ ] 4.5 Socket.IO server setup (Redis adapter, JWT auth)
-- [ ] 4.6 Messaging API (conversations, history)
-- [ ] 4.7 Message expiry task
-- [ ] 4.8 Connection notifications (Socket.IO real-time)
+### Phase 4 — Real-time Presence, Search & Announcements
+- [ ] 4.1 Connections & Follow request handlers
+- [ ] 4.2 Full-text search (tsvector columns, triggers, GIN indexing)
+- [ ] 4.3 Socket.IO Presence tracking in Redis
+- [ ] 4.4 Admin Analytics overview
+- [ ] 4.5 Announcements & newsletters (notify tasks)
 - [ ] **Phase 4 Milestone Check**
 
 ### Phase 5 — PDF & Polish

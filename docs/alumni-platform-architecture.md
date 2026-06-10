@@ -110,7 +110,7 @@ The platform is **institution-controlled**: faculty/administrators moderate, cre
 | File Storage | Cloudflare R2 (S3 API)        | Zero egress fees                      |
 | CDN          | Cloudflare                    | Static assets, global edge            |
 
-### AI & Future
+### AI & Future (Added much latter)
 
 | Layer       | Technology                | Notes                                |
 | ----------- | ------------------------- | ------------------------------------ |

@@ -14,11 +14,12 @@
 import argon2 from "argon2";
 import { SignJWT, jwtVerify } from "jose";
 import { createHash, randomBytes } from "node:crypto";
-import { db } from "../../config/db.js";
-import { env } from "../../config/env.js";
-import { logger } from "../../config/logger.js";
-import { nowDate, nowTimestamp } from "@alumni/shared";
-import { sendConfirmationEmail } from "../../tasks/email.tasks.js";
+import { db } from "@/config/db.js";
+import { env } from "@/config/env.js";
+import { logger } from "@/config/logger.js";
+import { nowTimestamp } from "@alumni/shared";
+import { sendConfirmationEmail } from "@/tasks/email.tasks.js";
+import { notifyAdminNewVerification } from "@/tasks/notification.tasks.js";
 import type { RegisterInput, LoginInput } from "./schemas.js";
 import type { AuthTokens, PublicUser } from "./types.js";
 
@@ -143,6 +144,30 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
       data: { userId: created.userId },
     });
 
+    if (input.networkId && input.role) {
+      await tx.networkMember.create({
+        data: {
+          userId: created.userId,
+          networkId: input.networkId,
+          role: input.role,
+          status: "PENDING",
+        },
+      });
+
+      if (input.verificationMethod) {
+        await tx.verificationRequest.create({
+          data: {
+            userId: created.userId,
+            networkId: input.networkId,
+            method: input.verificationMethod,
+            entryNumber: input.entryNumber ?? null,
+            documentUrl: input.documentUrl ?? null,
+            status: "PENDING",
+          },
+        });
+      }
+    }
+
     return created;
   });
 
@@ -154,6 +179,20 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
     email: user.email,
     username: user.username,
   });
+
+  if (input.networkId && input.role && input.verificationMethod) {
+    const verReq = await db.verificationRequest.findFirst({
+      where: { userId: user.userId, networkId: input.networkId },
+    });
+    if (verReq) {
+      await notifyAdminNewVerification.trigger({
+        reqId: verReq.reqId,
+        networkId: input.networkId,
+        userId: user.userId,
+        userFullName: input.fullName ?? user.username,
+      });
+    }
+  }
 
   return toPublicUser(user);
 }

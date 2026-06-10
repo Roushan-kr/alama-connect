@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "",
   "main": "index.js",
-  "type": "commonjs",
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -17,8 +17,10 @@
   "license": "ISC",
   "packageManager": "pnpm@10.19.0",
   "dependencies": {
+    "@alumni/shared": "workspace:*",
     "@hookform/resolvers": "^5.2.2",
     "@sentry/nextjs": "^10.53.1",
+    "@tailwindcss/postcss": "^4.3.0",
     "@tanstack/react-query": "^5.100.10",
     "next": "^16.2.6",
     "react": "^19.2.6",

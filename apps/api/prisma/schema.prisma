@@ -122,6 +122,8 @@ model User {
   workExperiences      WorkExperience[]
   userSkills           UserSkill[]
   certifications       Certification[]
+  rosterUploads        RosterUploadSession[] @relation("RosterUploader")
+  emailCampaigns       EmailCampaign[]       @relation("CampaignCreator")
   // Content
   createdContent       Content[]            @relation("ContentAuthor")
   postLikes            PostLike[]
@@ -217,6 +219,9 @@ model Network {
   groups               Group[]
   jobs                 Job[]
   notifications        Notification[]
+  rosterUploadSessions RosterUploadSession[]
+  rosterRecords        RosterRecord[]
+  emailCampaigns       EmailCampaign[]
 
   @@map("networks")
 }
@@ -701,4 +706,93 @@ model UserSettings {
   user User @relation(fields: [userId], references: [userId], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+// ── Phase 1.3 — Roster Management ────────────────────────────────────────────
+
+model RosterUploadSession {
+  sessionId    String   @id @default(uuid()) @map("session_id") @db.Uuid
+  networkId    String   @map("network_id") @db.Uuid
+  uploadedBy   String   @map("uploaded_by") @db.Uuid
+  originalName String   @map("original_name")
+  r2Key        String   @map("r2_key")
+  /// PENDING | SANITIZING | SANITIZED | MAPPED | MERGING | COMPLETE | FAILED
+  status       String   @default("PENDING")
+  mergeSummary Json?    @map("merge_summary")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  network        Network               @relation(fields: [networkId], references: [networkId])
+  uploader       User                  @relation("RosterUploader", fields: [uploadedBy], references: [userId])
+  columnMappings RosterColumnMapping[]
+  records        RosterRecord[]        @relation("FirstSeenVia")
+
+  @@index([networkId, createdAt(sort: Desc)])
+  @@map("roster_upload_sessions")
+}
+
+model RosterColumnMapping {
+  mappingId   String  @id @default(uuid()) @map("mapping_id") @db.Uuid
+  sessionId   String  @map("session_id") @db.Uuid
+  excelHeader String  @map("excel_header")
+  templateVar String  @map("template_var")
+  isCoreField Boolean @default(false) @map("is_core_field")
+  coreField   String? @map("core_field")
+
+  session RosterUploadSession @relation(fields: [sessionId], references: [sessionId], onDelete: Cascade)
+
+  @@unique([sessionId, excelHeader])
+  @@unique([sessionId, templateVar])
+  @@map("roster_column_mappings")
+}
+
+model RosterRecord {
+  recordId          String   @id @default(uuid()) @map("record_id") @db.Uuid
+  networkId         String   @map("network_id") @db.Uuid
+  entryNumber       String   @map("entry_number")
+  fullName          String?  @map("full_name")
+  email             String?
+  branch            String?
+  batch             Int?     @db.SmallInt
+  role              String?
+  meta              Json     @default("{}")
+  removedFromRoster Boolean  @default(false) @map("removed_from_roster")
+  /// R2 key of first session that created this record (relation via FirstSeenVia).
+  firstSeenSession  String?  @map("first_seen_session") @db.Uuid
+  /// Plain FK — no Prisma relation to avoid ambiguous relation error.
+  lastSeenSession   String?  @map("last_seen_session") @db.Uuid
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  network     Network              @relation(fields: [networkId], references: [networkId])
+  firstUpload RosterUploadSession? @relation("FirstSeenVia", fields: [firstSeenSession], references: [sessionId])
+
+  @@unique([networkId, entryNumber])
+  @@index([networkId, batch])
+  @@index([networkId, branch])
+  @@index([networkId, removedFromRoster])
+  @@index([networkId, lastSeenSession])
+  @@map("roster_records")
+}
+
+model EmailCampaign {
+  campaignId   String    @id @default(uuid()) @map("campaign_id") @db.Uuid
+  networkId    String    @map("network_id") @db.Uuid
+  createdBy    String    @map("created_by") @db.Uuid
+  name         String
+  subject      String
+  bodyTemplate String    @map("body_template")
+  filter       Json      @default("{}")
+  /// DRAFT | SCHEDULED | SENDING | COMPLETE | FAILED
+  status       String    @default("DRAFT")
+  scheduledAt  DateTime? @map("scheduled_at") @db.Timestamptz
+  sendSummary  Json?     @map("send_summary")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  network Network @relation(fields: [networkId], references: [networkId])
+  creator User    @relation("CampaignCreator", fields: [createdBy], references: [userId])
+
+  @@index([networkId, status])
+  @@map("email_campaigns")
 }

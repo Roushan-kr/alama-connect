@@ -181,3 +181,22 @@ export function buildVerificationOutcomeEmail(
 </body>
 </html>`;
 }
+
+/**
+ * Send a raw HTML email — used by the campaign task for template-rendered bodies.
+ * Reuses the same Nodemailer transporter as sendEmail.
+ *
+ * @param options - Recipient, subject, and rendered HTML body
+ */
+export async function sendRaw(options: {
+  to: string
+  subject: string
+  html: string
+}): Promise<void> {
+  await sendEmail({
+    to: options.to,
+    subject: options.subject,
+    html: options.html,
+  })
+}
+

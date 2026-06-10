@@ -8,7 +8,8 @@
     "rootDir": "../../",
     "outDir": "./dist",
     "paths": {
-      "@alumni/shared": ["../../packages/shared/src/index.ts"]
+      "@alumni/shared": ["../../packages/shared/src/index.ts"],
+      "@/*": ["./src/*"]
     }
   },
   "include": ["src/**/*", "prisma.config.ts", "scripts/**/*"],

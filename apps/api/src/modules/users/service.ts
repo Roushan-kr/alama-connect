@@ -9,7 +9,12 @@
 import { db } from "../../config/db.js"
 import { redis } from "../../config/redis.js"
 import { logger } from "../../config/logger.js"
-import type { UpdateProfileInput } from "./schemas.js"
+import type {
+  UpdateProfileInput,
+  CreateExperienceInput,
+  UpdateExperienceInput,
+  AddSkillInput,
+} from "./schemas.js"
 
 // ── Cache helpers ─────────────────────────────────────────────────────────────
 
@@ -313,4 +318,192 @@ export async function getUserById(targetUserId: string): Promise<PublicProfileRe
     skills: user.userSkills.map((us) => us.skill),
     networkMemberships: user.networkMemberships,
   }
+}
+
+// ── Profile cache invalidation ────────────────────────────────────────────────
+
+async function invalidateProfileCache(userId: string): Promise<void> {
+  await redis.del(profileCacheKey(userId))
+}
+
+// ── Education ─────────────────────────────────────────────────────────────────
+
+export interface EducationItem {
+  eduId: string
+  degree: string | null
+  field: string | null
+  startYear: number | null
+  endYear: number | null
+  isVerified: boolean
+  network: { networkId: string; name: string; code: string }
+}
+
+export async function getMyEducation(userId: string): Promise<EducationItem[]> {
+  const rows = await db.education.findMany({
+    where: { userId },
+    select: {
+      eduId: true,
+      degree: true,
+      field: true,
+      startYear: true,
+      endYear: true,
+      isVerified: true,
+      network: { select: { networkId: true, name: true, code: true } },
+    },
+    orderBy: { startYear: "desc" },
+  })
+
+  return rows
+}
+
+// ── Work experience ───────────────────────────────────────────────────────────
+
+export interface ExperienceItem {
+  expId: string
+  title: string
+  company: string
+  location: string | null
+  startDate: string
+  endDate: string | null
+  description: string | null
+}
+
+function toExperienceItem(row: {
+  expId: string
+  title: string
+  company: string
+  location: string | null
+  startDate: Date
+  endDate: Date | null
+  description: string | null
+}): ExperienceItem {
+  return {
+    expId: row.expId,
+    title: row.title,
+    company: row.company,
+    location: row.location,
+    startDate: row.startDate.toISOString().slice(0, 10),
+    endDate: row.endDate ? row.endDate.toISOString().slice(0, 10) : null,
+    description: row.description,
+  }
+}
+
+export async function createExperience(
+  userId: string,
+  input: CreateExperienceInput,
+): Promise<ExperienceItem> {
+  const row = await db.workExperience.create({
+    data: {
+      userId,
+      title: input.title,
+      company: input.company,
+      location: input.location ?? null,
+      startDate: new Date(input.startDate),
+      endDate: input.endDate ? new Date(input.endDate) : null,
+      description: input.description ?? null,
+    },
+  })
+
+  await invalidateProfileCache(userId)
+  return toExperienceItem(row)
+}
+
+export async function updateExperience(
+  userId: string,
+  expId: string,
+  input: UpdateExperienceInput,
+): Promise<ExperienceItem> {
+  const existing = await db.workExperience.findFirst({
+    where: { expId, userId },
+  })
+
+  if (!existing) {
+    throw Object.assign(new Error("Work experience not found"), {
+      code: "NOT_FOUND",
+      status: 404,
+    })
+  }
+
+  const row = await db.workExperience.update({
+    where: { expId },
+    data: {
+      ...(input.title !== undefined && { title: input.title }),
+      ...(input.company !== undefined && { company: input.company }),
+      ...(input.location !== undefined && { location: input.location ?? null }),
+      ...(input.startDate !== undefined && {
+        startDate: new Date(input.startDate),
+      }),
+      ...(input.endDate !== undefined && {
+        endDate: input.endDate ? new Date(input.endDate) : null,
+      }),
+      ...(input.description !== undefined && {
+        description: input.description ?? null,
+      }),
+    },
+  })
+
+  await invalidateProfileCache(userId)
+  return toExperienceItem(row)
+}
+
+export async function deleteExperience(
+  userId: string,
+  expId: string,
+): Promise<void> {
+  const result = await db.workExperience.deleteMany({
+    where: { expId, userId },
+  })
+
+  if (result.count === 0) {
+    throw Object.assign(new Error("Work experience not found"), {
+      code: "NOT_FOUND",
+      status: 404,
+    })
+  }
+
+  await invalidateProfileCache(userId)
+}
+
+// ── Skills ────────────────────────────────────────────────────────────────────
+
+export async function addSkill(
+  userId: string,
+  input: AddSkillInput,
+): Promise<{ skillId: number; name: string }> {
+  const name = input.name.trim()
+
+  let skill = await db.skill.findFirst({
+    where: { name: { equals: name, mode: "insensitive" } },
+  })
+
+  if (!skill) {
+    skill = await db.skill.create({ data: { name } })
+  }
+
+  await db.userSkill.upsert({
+    where: { userId_skillId: { userId, skillId: skill.skillId } },
+    create: { userId, skillId: skill.skillId },
+    update: {},
+  })
+
+  await invalidateProfileCache(userId)
+  return { skillId: skill.skillId, name: skill.name }
+}
+
+export async function removeSkill(
+  userId: string,
+  skillId: number,
+): Promise<void> {
+  const result = await db.userSkill.deleteMany({
+    where: { userId, skillId },
+  })
+
+  if (result.count === 0) {
+    throw Object.assign(new Error("Skill not found on your profile"), {
+      code: "NOT_FOUND",
+      status: 404,
+    })
+  }
+
+  await invalidateProfileCache(userId)
 }

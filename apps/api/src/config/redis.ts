@@ -10,49 +10,39 @@
  *   - `createSubscriber()` — create a dedicated subscriber client (needed for pub/sub)
  */
 
-import { Redis } from "ioredis";
-import { env } from "./env.js";
-import { logger } from "./logger.js";
-
+import { Redis } from "ioredis"
+import { env } from "./env.js"
+import { logger } from "./logger.js"
 
 function createRedisClient(name: string): Redis {
   const client = new Redis(env.REDIS_URL, {
     // Upstash closes idle connections — auto-reconnect.
     retryStrategy(times: number) {
-      const delay = Math.min(times * 100, 3000);
-      logger.warn({ attempt: times, delayMs: delay }, `[Redis:${name}] reconnecting`);
-      return delay;
+      const delay = Math.min(times * 100, 3000)
+      logger.warn({ attempt: times, delayMs: delay }, `[Redis:${name}] reconnecting`)
+      return delay
     },
     maxRetriesPerRequest: 3,
     enableReadyCheck: true,
     lazyConnect: false,
-  });
+  })
 
-  client.on("connect", () =>
-    logger.info(`[Redis:${name}] connected`),
-  );
-  client.on("error", (err: Error) =>
-    logger.error({ err }, `[Redis:${name}] error`),
-  );
-  client.on("close", () =>
-    logger.warn(`[Redis:${name}] connection closed`),
-  );
+  client.on("connect", () => logger.info(`[Redis:${name}] connected`))
+  client.on("error", (err: Error) => logger.error({ err }, `[Redis:${name}] error`))
+  client.on("close", () => logger.warn(`[Redis:${name}] connection closed`))
 
-  return client;
+  return client
 }
 
 /** Main Redis client for get/set/del/zadd operations. */
-export const redis = createRedisClient("main");
+export const redis = createRedisClient("main")
 
 /**
  * Publish a JSON payload to a Redis pub/sub channel.
  * Used for real-time notifications and Socket.IO cross-instance messaging.
  */
-export async function redisPublish(
-  channel: string,
-  payload: unknown,
-): Promise<void> {
-  await redis.publish(channel, JSON.stringify(payload));
+export async function redisPublish(channel: string, payload: unknown): Promise<void> {
+  await redis.publish(channel, JSON.stringify(payload))
 }
 
 /**
@@ -61,5 +51,5 @@ export async function redisPublish(
  * so callers must create a separate instance.
  */
 export function createSubscriber(): Redis {
-  return createRedisClient("subscriber");
+  return createRedisClient("subscriber")
 }

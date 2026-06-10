@@ -25,6 +25,55 @@ const retryConfig = {
   randomize: true,
 };
 
+// ── Task: createInAppNotification (shared helper for Phase 2+ events) ─────────
+
+export interface CreateInAppNotificationPayload {
+  userId: string
+  networkId?: string
+  type:
+    | "POST_LIKED"
+    | "POST_COMMENTED"
+    | "POST_MENTIONED"
+    | "CONNECTION_REQUEST"
+    | "CONNECTION_ACCEPTED"
+    | "GROUP_ADDED"
+    | "NEW_MESSAGE"
+    | "ACCOUNT_VERIFIED"
+    | "ACCOUNT_REJECTED"
+    | "ANNOUNCEMENT"
+    | "NEWSLETTER"
+  relatedId?: string
+  message: string
+  link?: string
+}
+
+/**
+ * Creates an in-app notification row and publishes to Redis for real-time delivery.
+ */
+export const createInAppNotification = task({
+  id: "create-in-app-notification",
+  retry: retryConfig,
+  run: async (payload: CreateInAppNotificationPayload) => {
+    await db.notification.create({
+      data: {
+        userId: payload.userId,
+        networkId: payload.networkId ?? null,
+        type: payload.type,
+        relatedId: payload.relatedId ?? null,
+        message: payload.message,
+        link: payload.link ?? null,
+      },
+    })
+
+    await redisPublish(`user:${payload.userId}:notif`, {
+      type: payload.type,
+      message: payload.message,
+      link: payload.link ?? null,
+      relatedId: payload.relatedId ?? null,
+    })
+  },
+})
+
 // ── Task: notifyAdminNewVerification ─────────────────────────────────────────
 
 export interface NotifyAdminNewVerificationPayload {
@@ -169,3 +218,66 @@ export const notifyUserVerificationOutcome = task({
     );
   },
 });
+
+export interface NotifyNetworkNewJobPayload {
+  jobId: string;
+  networkId: string;
+  title: string;
+  networkName: string;
+}
+
+export const notifyNetworkNewJob = task({
+  id: "notify-network-new-job",
+  retry: retryConfig,
+  run: async (payload: NotifyNetworkNewJobPayload) => {
+    logger.info(
+      { jobId: payload.jobId, networkId: payload.networkId },
+      "[Task:notifyNetworkNewJob] starting",
+    );
+
+    // Find all verified members in this network
+    const members = await db.networkMember.findMany({
+      where: {
+        networkId: payload.networkId,
+        status: "VERIFIED",
+      },
+      select: { userId: true },
+    });
+
+    if (members.length === 0) {
+      return;
+    }
+
+    const message = `New job opening in ${payload.networkName}: ${payload.title}`;
+    const link = `/jobs`;
+
+    // Batch create notifications
+    await db.notification.createMany({
+      data: members.map((member) => ({
+        userId: member.userId,
+        networkId: payload.networkId,
+        type: "ANNOUNCEMENT" as const,
+        relatedId: payload.jobId,
+        message,
+        link,
+      })),
+      skipDuplicates: true,
+    });
+
+    // Publish notifications to Redis for online members
+    for (const member of members) {
+      await redisPublish(`user:${member.userId}:notif`, {
+        type: "ANNOUNCEMENT",
+        message,
+        link,
+        relatedId: payload.jobId,
+      });
+    }
+
+    logger.info(
+      { jobId: payload.jobId, count: members.length },
+      "[Task:notifyNetworkNewJob] done",
+    );
+  },
+});
+

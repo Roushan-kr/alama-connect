@@ -11,10 +11,9 @@
  *     --logo "https://cdn.example.com/logos/ptu.png"
  */
 
-import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
+import { db } from "../../src/config/db.js";
 import { parseArgs } from "node:util";
-
-const db = new PrismaClient();
 
 async function main() {
   const { values } = parseArgs({

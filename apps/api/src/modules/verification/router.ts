@@ -22,10 +22,64 @@ import {
   approveRequest,
   rejectRequest,
 } from "./service.js";
-import { requireAuth } from "../../middleware/requireAuth.js";
-import { logger } from "../../config/logger.js";
+import { requireAuth } from "@/middleware/requireAuth.js";
+import { logger } from "@/config/logger.js";
 
 export const verificationRouter: FastifyPluginAsync = async (fastify) => {
+  // ── POST /api/verification/upload ───────────────────────────────────────────
+  fastify.post("/upload", async (request, reply) => {
+    let fileBuffer: Buffer | undefined;
+    let filename: string | undefined;
+    let mimeType: string | undefined;
+
+    try {
+      const parts = request.parts();
+      for await (const part of parts) {
+        if (part.type === "file") {
+          fileBuffer = await part.toBuffer();
+          filename = part.filename;
+          mimeType = part.mimetype;
+        }
+      }
+    } catch (err) {
+      logger.warn({ err }, "[Verification] upload parse error");
+      return reply.status(400).send({
+        error: "Invalid file upload data",
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    if (!fileBuffer || !filename) {
+      return reply.status(400).send({
+        error: "No file uploaded",
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    try {
+      const { scanBuffer } = await import("@/services/storage/virusScan.js");
+      const scanResult = await scanBuffer(fileBuffer);
+      if (!scanResult.clean) {
+        return reply.status(400).send({
+          error: `Malicious file detected: ${scanResult.threat ?? "unknown"}`,
+          code: "VIRUS_DETECTED",
+        });
+      }
+
+      const { uploadFile, buildKey } = await import("@/services/storage/index.js");
+      const safeKey = buildKey("verifications", `${Date.now()}-${filename}`);
+      await uploadFile(fileBuffer, safeKey, mimeType ?? "application/octet-stream");
+
+      return reply.status(200).send({ data: { documentUrl: safeKey } });
+    } catch (err: unknown) {
+      logger.error({ err }, "[Verification] upload failed");
+      return reply.status(500).send({
+        error: "Upload failed",
+        code: "INTERNAL_ERROR",
+      });
+    }
+  });
+
   // ── POST /api/verification/submit ───────────────────────────────────────────
   fastify.post(
     "/submit",

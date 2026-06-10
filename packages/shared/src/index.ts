@@ -49,11 +49,11 @@ export interface ApiError {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** UUID string validated by Zod. */
-export const ZodUuid = z.string().uuid()
+export const ZodUuid = z.uuid()
 
 /** Cursor pagination query params shared by all list endpoints. */
 export const PaginationQuerySchema = z.object({
-  cursor: z.string().uuid().optional(),
+  cursor: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 })
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>

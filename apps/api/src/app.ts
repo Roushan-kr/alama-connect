@@ -12,12 +12,26 @@ import cors from "@fastify/cors"
 import multipart from "@fastify/multipart"
 import { env } from "./config/env.js"
 import { logger } from "./config/logger.js"
+import { db } from "./config/db.js"
 
 // Route plugins
 import { authRouter } from "./modules/auth/router.js"
 import { verificationRouter } from "./modules/verification/router.js"
 import { usersRouter } from "./modules/users/router.js"
+import { feedRouter } from "./modules/feed/router.js"
+import { postsRouter, commentsRouter } from "./modules/posts/router.js"
+import { followRouter } from "./modules/follow/router.js"
+import { notificationsRouter } from "./modules/notifications/router.js"
+import { jobsRouter } from "./modules/jobs/router.js"
+import { groupsRouter } from "./modules/groups/router.js"
+import { messagingRouter } from "./modules/messaging/router.js"
+import { connectionsRouter } from "./modules/connections/router.js"
+import { searchRouter } from "./modules/search/router.js"
+import { presenceRouter } from "./modules/presence/router.js"
+import { adminRouter } from "./modules/admin/router.js"
+import { rosterRouter } from "./modules/roster/router.js"
 import { nowISO } from "@alumni/shared"
+
 
 /**
  * Build and configure the Fastify app.
@@ -48,7 +62,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(multipart, {
     limits: {
       fileSize: 10 * 1024 * 1024, // 10 MB
-      files: 1, // max 1 file per request in Phase 1
+      files: 4, // up to 4 images per post (Phase 2)
     },
   })
 
@@ -84,13 +98,48 @@ export async function buildApp(): Promise<FastifyInstance> {
     })
   })
 
+  // ── GET /api/networks ──────────────────────────────────────────────────────
+
+  app.get("/api/networks", async (_request, reply) => {
+    try {
+      const networks = await db.network.findMany({
+        select: {
+          networkId: true,
+          name: true,
+          code: true,
+          logoUrl: true,
+          allowedDomains: true,
+        },
+        orderBy: { name: "asc" },
+      })
+      return reply.status(200).send({ data: networks })
+    } catch (err: unknown) {
+      logger.error({ err }, "[App] failed to fetch networks")
+      return reply.status(500).send({
+        error: "Failed to fetch networks",
+        code: "INTERNAL_ERROR",
+      })
+    }
+  })
+
   // ── Route Modules ─────────────────────────────────────────────────────────
 
   await app.register(authRouter, { prefix: "/api/auth" })
   await app.register(verificationRouter, { prefix: "/api/verification" })
   await app.register(usersRouter, { prefix: "/api/users" })
-
-  // Phase 2+ routers will be registered here.
+  await app.register(feedRouter, { prefix: "/api/feed" })
+  await app.register(postsRouter, { prefix: "/api/posts" })
+  await app.register(commentsRouter, { prefix: "/api/comments" })
+  await app.register(followRouter, { prefix: "/api/follow" })
+  await app.register(notificationsRouter, { prefix: "/api/notifications" })
+  await app.register(jobsRouter, { prefix: "/api/jobs" })
+  await app.register(groupsRouter, { prefix: "/api/groups" })
+  await app.register(messagingRouter, { prefix: "/api" })
+  await app.register(connectionsRouter, { prefix: "/api/connections" })
+  await app.register(searchRouter, { prefix: "/api/search" })
+  await app.register(presenceRouter, { prefix: "/api/presence" })
+  await app.register(adminRouter, { prefix: "/api/admin" })
+  await app.register(rosterRouter, { prefix: "/api/admin/roster" })
 
   return app
 }

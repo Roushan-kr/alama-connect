@@ -9,7 +9,7 @@ import { z } from "zod";
 
 /** Registration input. */
 export const RegisterSchema = z.object({
-  email: z.string().email("Invalid email address").toLowerCase(),
+  email: z.email("Invalid email address").toLowerCase(),
   username: z
     .string()
     .min(3, "Username must be at least 3 characters")
@@ -23,12 +23,17 @@ export const RegisterSchema = z.object({
     .min(8, "Password must be at least 8 characters")
     .max(128, "Password must be at most 128 characters"),
   fullName: z.string().min(2, "Full name is required").max(100).optional(),
+  networkId: z.uuid("Invalid network ID").optional(),
+  role: z.enum(["STUDENT", "ALUMNI", "FACULTY", "ADMIN"]).optional(),
+  verificationMethod: z.enum(["ENTRY_NUMBER", "DOCUMENT_UPLOAD"]).optional(),
+  entryNumber: z.string().optional(),
+  documentUrl: z.string().optional(),
 });
 export type RegisterInput = z.infer<typeof RegisterSchema>;
 
 /** Login input. */
 export const LoginSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.email().toLowerCase(),
   password: z.string().min(1, "Password is required"),
 });
 export type LoginInput = z.infer<typeof LoginSchema>;

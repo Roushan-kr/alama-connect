@@ -12,12 +12,11 @@
  *     --name "Dr. Sharma"
  */
 
-import { PrismaClient } from "@prisma/client"
+import "dotenv/config"
+import { db } from "../../src/config/db.js"
 import argon2 from "argon2"
 import { parseArgs } from "node:util"
 import { randomBytes } from "node:crypto"
-
-const db = new PrismaClient()
 
 /** Generate a cryptographically random printable password. */
 function generateTempPassword(length = 12): string {

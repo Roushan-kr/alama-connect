@@ -10,8 +10,12 @@
  */
 
 import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import pg from "pg";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
+
+const { Pool } = pg;
 
 // Extend the global type to hold our cached Prisma instance in dev.
 const globalForPrisma = globalThis as unknown as {
@@ -19,7 +23,11 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrismaClient(): PrismaClient {
+  const pool = new Pool({ connectionString: env.DATABASE_URL });
+  const adapter = new PrismaPg(pool);
+
   const client = new PrismaClient({
+    adapter,
     log:
       env.NODE_ENV === "development"
         ? [

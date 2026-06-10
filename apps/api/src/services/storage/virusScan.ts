@@ -10,8 +10,8 @@
  * Never store a file buffer to permanent storage without a passing scan result.
  */
 
-import { env } from "../../config/env.js";
-import { logger } from "../../config/logger.js";
+import { env } from "@/config/env.js";
+import { logger } from "@/config/logger.js";
 
 export interface ScanResult {
   clean: boolean;

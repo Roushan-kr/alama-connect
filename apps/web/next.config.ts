@@ -35,7 +35,9 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.r2.cloudflarestorage.com https://cdn.yourdomain.com",
               "font-src 'self'",
-              "connect-src 'self' wss: https:",
+              process.env.NODE_ENV === 'development'
+                ? "connect-src 'self' http://localhost:3001 ws://localhost:3001 wss: https:"
+                : "connect-src 'self' wss: https:",
             ].join('; '),
           },
         ],

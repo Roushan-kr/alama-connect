@@ -48,7 +48,7 @@ const EnvSchema = z.object({
     .optional(),
   R2_BUCKET_NAME: z.string().min(1, "R2_BUCKET_NAME is required").optional(),
   /** Public CDN URL prefix for serving signed assets (no trailing slash). */
-  R2_PUBLIC_URL: z.string().url().optional(),
+  R2_PUBLIC_URL: z.url().optional(),
 
   // ── Email (SMTP via Nodemailer) ───────────────────────────────────────────
   SMTP_HOST: z.string().default("smtp.gmail.com"),
@@ -61,7 +61,7 @@ const EnvSchema = z.object({
   TRIGGER_SECRET_KEY: z.string().min(1, "TRIGGER_SECRET_KEY is required"),
 
   // ── Frontend URL (for email deep-links) ──────────────────────────────────
-  WEB_URL: z.string().url().default("http://localhost:3000"),
+  WEB_URL: z.url().default("http://localhost:3000"),
 
   // ── CORS ─────────────────────────────────────────────────────────────────
   /** Comma-separated list of allowed origins, e.g. "http://localhost:3000,https://app.alumni.dev" */

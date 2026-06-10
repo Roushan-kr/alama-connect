@@ -36,3 +36,39 @@ export const GetUserSchema = z.object({
   userId: z.uuid(),
 });
 export type GetUserParams = z.infer<typeof GetUserSchema>;
+
+const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD format");
+
+/** Create a work experience entry. */
+export const CreateExperienceSchema = z.object({
+  title: z.string().min(1).max(200),
+  company: z.string().min(1).max(200),
+  location: z.string().max(200).optional(),
+  startDate: dateString,
+  endDate: dateString.optional(),
+  description: z.string().max(2000).optional(),
+});
+export type CreateExperienceInput = z.infer<typeof CreateExperienceSchema>;
+
+/** Update a work experience entry (at least one field). */
+export const UpdateExperienceSchema = CreateExperienceSchema.partial().refine(
+  (data) => Object.keys(data).length > 0,
+  { message: "At least one field must be provided" },
+);
+export type UpdateExperienceInput = z.infer<typeof UpdateExperienceSchema>;
+
+export const ExperienceIdParamsSchema = z.object({
+  expId: z.uuid(),
+});
+export type ExperienceIdParams = z.infer<typeof ExperienceIdParamsSchema>;
+
+/** Add a skill by name (catalogue is normalised on write). */
+export const AddSkillSchema = z.object({
+  name: z.string().min(1).max(100).trim(),
+});
+export type AddSkillInput = z.infer<typeof AddSkillSchema>;
+
+export const SkillIdParamsSchema = z.object({
+  skillId: z.coerce.number().int().positive(),
+});
+export type SkillIdParams = z.infer<typeof SkillIdParamsSchema>;

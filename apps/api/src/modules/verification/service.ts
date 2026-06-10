@@ -16,6 +16,7 @@ import { db } from "../../config/db.js";
 import { logger } from "../../config/logger.js";
 import { scanBuffer } from "../../services/storage/virusScan.js";
 import { uploadFile, buildKey } from "../../services/storage/index.js";
+import { normalizeEntryNumber } from "../../lib/entry-number.js";
 import {
   notifyAdminNewVerification,
   notifyUserVerificationOutcome,
@@ -78,6 +79,33 @@ export async function submitVerification(
     );
   }
 
+  let finalEntryNumber: string | null = null;
+  let autoAdminNotes: string | null = null;
+
+  // ── ENTRY_NUMBER validation against roster_records ─────────────────────────
+  if (input.method === "ENTRY_NUMBER" && input.entryNumber) {
+    const normalized = normalizeEntryNumber(input.entryNumber);
+    finalEntryNumber = normalized;
+
+    const rosterRecord = await db.rosterRecord.findFirst({
+      where: {
+        networkId: input.networkId,
+        entryNumber: normalized,
+        removedFromRoster: false,
+      },
+      select: { recordId: true },
+    });
+
+    if (!rosterRecord) {
+      throw Object.assign(
+        new Error("Entry number not found in institutional records"),
+        { code: "ENTRY_NUMBER_NOT_FOUND", status: 400 },
+      );
+    }
+
+    autoAdminNotes = `[auto] Matched roster_record: ${rosterRecord.recordId}`;
+  }
+
   // ── STEP 1: Virus scan (BEFORE any storage) ───────────────────────────────
   let documentUrl: string | undefined;
 
@@ -113,9 +141,10 @@ export async function submitVerification(
       userId,
       networkId: input.networkId,
       method: input.method,
-      entryNumber: input.entryNumber ?? null,
+      entryNumber: finalEntryNumber,
       documentUrl: documentUrl ?? null,
       status: "PENDING",
+      adminNotes: autoAdminNotes,
     },
   });
 
