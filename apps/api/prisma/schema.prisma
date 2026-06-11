@@ -701,6 +701,8 @@ model UserSettings {
   onboardingCompleted  Boolean   @default(false) @map("onboarding_completed")
   /// Set to true when account deletion was requested; hard-delete after 30d.
   deletionRequestedAt  DateTime? @map("deletion_requested_at") @db.Timestamptz
+  disabledAt           DateTime? @map("disabled_at") @db.Timestamptz
+  disabledReason       String?   @map("disabled_reason")
   updatedAt            DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
   user User @relation(fields: [userId], references: [userId], onDelete: Cascade)

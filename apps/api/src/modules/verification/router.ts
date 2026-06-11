@@ -24,6 +24,10 @@ import {
 } from "./service.js";
 import { requireAuth } from "@/middleware/requireAuth.js";
 import { logger } from "@/config/logger.js";
+import { db } from "@/config/db.js";
+import { assertNetworkAdmin } from "@/middleware/requireRole.js";
+import { getSignedUrl } from "@/services/storage/index.js";
+
 
 export const verificationRouter: FastifyPluginAsync = async (fastify) => {
   // ── POST /api/verification/upload ───────────────────────────────────────────
@@ -150,13 +154,16 @@ export const verificationRouter: FastifyPluginAsync = async (fastify) => {
         });
       }
 
-      // TODO: enforce admin role check with requireRole once networkId is from query.
-      // For now, the route is auth-gated; service-level admin check via network membership
-      // should be added in Phase 2 when requireRole('query', ['ADMIN']) is wired up.
-
       try {
+        await assertNetworkAdmin(
+          request.user.userId,
+          parsed.data.networkId,
+          request.user.globalRole,
+        );
+
         const result = await getPendingRequests(
           parsed.data.networkId,
+          parsed.data.status,
           parsed.data.cursor,
           parsed.data.limit,
         );
@@ -191,6 +198,12 @@ export const verificationRouter: FastifyPluginAsync = async (fastify) => {
       }
 
       try {
+        const reqRow = await db.verificationRequest.findUnique({ where: { reqId } });
+        if (!reqRow) {
+          return reply.status(404).send({ error: "Verification request not found", code: "NOT_FOUND" });
+        }
+        await assertNetworkAdmin(request.user.userId, reqRow.networkId, request.user.globalRole);
+
         await approveRequest(reqId, request.user.userId, parsed.data?.notes);
         return reply.status(200).send({ data: { reqId, status: "VERIFIED" } });
       } catch (err: unknown) {
@@ -216,8 +229,55 @@ export const verificationRouter: FastifyPluginAsync = async (fastify) => {
       }
 
       try {
+        const reqRow = await db.verificationRequest.findUnique({ where: { reqId } });
+        if (!reqRow) {
+          return reply.status(404).send({ error: "Verification request not found", code: "NOT_FOUND" });
+        }
+        await assertNetworkAdmin(request.user.userId, reqRow.networkId, request.user.globalRole);
+
         await rejectRequest(reqId, request.user.userId, parsed.data?.reason);
         return reply.status(200).send({ data: { reqId, status: "REJECTED" } });
+      } catch (err: unknown) {
+        return handleError(err, reply);
+      }
+    },
+  );
+
+  // ── GET /api/verification/admin/:reqId/document-url ──────────────────────────
+  fastify.get(
+    "/admin/:reqId/document-url",
+    { preHandler: [requireAuth] },
+    async (request, reply) => {
+      if (!request.user) return;
+      const { reqId } = request.params as { reqId: string };
+
+      try {
+        const req = await db.verificationRequest.findUnique({
+          where: { reqId },
+        });
+
+        if (!req) {
+          return reply.status(404).send({
+            error: "Verification request not found",
+            code: "NOT_FOUND",
+          });
+        }
+
+        if (!req.documentUrl) {
+          return reply.status(400).send({
+            error: "No document attached to this request",
+            code: "VALIDATION_ERROR",
+          });
+        }
+
+        await assertNetworkAdmin(
+          request.user.userId,
+          req.networkId,
+          request.user.globalRole,
+        );
+
+        const url = await getSignedUrl(req.documentUrl, 900);
+        return reply.status(200).send({ data: { url } });
       } catch (err: unknown) {
         return handleError(err, reply);
       }

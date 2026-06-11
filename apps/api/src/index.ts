@@ -31,6 +31,15 @@ async function main(): Promise<void> {
   try {
     await db.$queryRaw`SELECT 1`
     logger.info("[DB] connected to PostgreSQL")
+
+    // Ensure user_settings columns disabled_at and disabled_reason exist
+    await db.$executeRawUnsafe(
+      `ALTER TABLE "user_settings" ADD COLUMN IF NOT EXISTS "disabled_at" TIMESTAMPTZ;`
+    )
+    await db.$executeRawUnsafe(
+      `ALTER TABLE "user_settings" ADD COLUMN IF NOT EXISTS "disabled_reason" TEXT;`
+    )
+    logger.info("[DB] verified/created disabled columns on user_settings table")
   } catch (err) {
     logger.error({ err }, "[DB] failed to connect — is DATABASE_URL correct?")
     process.exit(1)

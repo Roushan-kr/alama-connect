@@ -12,6 +12,42 @@ export default function RosterPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setIsDragActive(true);
+    } else if (e.type === "dragleave") {
+      setIsDragActive(false);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  // Trigger merge confirmation mutation
+  const triggerMergeMutation = useMutation({
+    mutationFn: (sessId: string) =>
+      apiRequest(`/api/admin/roster/sessions/${sessId}/confirm`, {
+        method: "POST",
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      alert("Merge triggered successfully!");
+      queryClient.invalidateQueries({ queryKey: ["roster-sessions", networkId] });
+    },
+    onError: (err: any) => {
+      alert("Failed to trigger merge: " + err.message);
+    },
+  });
 
   // Load user profile to identify networks
   const { data: profile } = useQuery<any>({
@@ -105,7 +141,15 @@ export default function RosterPage() {
         )}
 
         <form onSubmit={handleUpload} className="mt-6 space-y-4 max-w-md">
-          <div className="border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center hover:border-brand-500 transition-colors">
+          <div
+            onDragEnter={handleDrag}
+            onDragOver={handleDrag}
+            onDragLeave={handleDrag}
+            onDrop={handleDrop}
+            className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+              isDragActive ? "border-brand-500 bg-brand-50/20" : "border-slate-200 hover:border-brand-500"
+            }`}
+          >
             <input
               type="file"
               accept=".xlsx,.xls,.csv"
@@ -119,7 +163,7 @@ export default function RosterPage() {
               <div className="text-sm font-semibold text-slate-700">
                 {file ? file.name : "Select or drag Excel/CSV file"}
               </div>
-              <div className="text-[10px] text-slate-400">Supported formats: XLSX, XLS, CSV</div>
+              <div className="text-[10px] text-slate-400">Supported formats: XLSX, XLS, CSV (Max 10MB)</div>
             </label>
           </div>
 
@@ -131,7 +175,7 @@ export default function RosterPage() {
 
           {sessionId && (
             <a
-              href={`/admin/roster/sessions/${sessionId}`}
+              href={`/admin/roster/sessions/${sessionId}/mapping`}
               className="inline-block text-xs font-bold text-brand-600 hover:text-brand-700 underline"
             >
               View Sanitization Status & Mappings &rarr;
@@ -157,42 +201,70 @@ export default function RosterPage() {
                 <th className="pb-3">Session ID</th>
                 <th className="pb-3">Original Name</th>
                 <th className="pb-3">Status</th>
+                <th className="pb-3">Records</th>
                 <th className="pb-3">Uploaded At</th>
                 <th className="pb-3 text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs text-slate-700">
-              {sessionsData?.data?.map((session: any) => (
-                <tr key={session.sessionId}>
-                  <td className="py-3 font-mono text-[10px] text-slate-400">{session.sessionId}</td>
-                  <td className="py-3 font-medium">{session.originalName}</td>
-                  <td className="py-3">
-                    <span
-                      className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
-                        session.status === "COMPLETE"
-                          ? "bg-emerald-50 text-emerald-700"
-                          : session.status === "FAILED"
-                          ? "bg-red-50 text-red-700"
-                          : "bg-amber-50 text-amber-700"
-                      }`}
-                    >
-                      {session.status}
-                    </span>
-                  </td>
-                  <td className="py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
-                  <td className="py-3 text-right">
-                    <a
-                      href={`/admin/roster/sessions/${session.sessionId}`}
-                      className="text-brand-600 hover:text-brand-700 font-bold hover:underline"
-                    >
-                      Manage
-                    </a>
-                  </td>
-                </tr>
-              ))}
+              {sessionsData?.data?.map((session: any) => {
+                let badgeClass = "bg-slate-50 text-slate-700 border-slate-100";
+                if (session.status === "COMPLETE") {
+                  badgeClass = "bg-green-50 text-green-700 border-green-100";
+                } else if (session.status === "FAILED") {
+                  badgeClass = "bg-red-50 text-red-700 border-red-100";
+                } else if (session.status === "MAPPED") {
+                  badgeClass = "bg-purple-50 text-purple-700 border-purple-100";
+                } else if (session.status === "SANITIZED") {
+                  badgeClass = "bg-blue-50 text-blue-700 border-blue-100";
+                } else if (
+                  session.status === "SANITIZING" ||
+                  session.status === "MERGING" ||
+                  session.status === "PENDING"
+                ) {
+                  badgeClass = "bg-amber-50 text-amber-700 border-amber-100";
+                }
+
+                const recordsCount =
+                  session.mergeSummary?.total ??
+                  session.mergeSummary?.totalRows ??
+                  session.mergeSummary?.inserted ??
+                  0;
+
+                return (
+                  <tr key={session.sessionId}>
+                    <td className="py-3 font-mono text-[10px] text-slate-400">{session.sessionId}</td>
+                    <td className="py-3 font-medium">{session.originalName}</td>
+                    <td className="py-3">
+                      <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${badgeClass}`}>
+                        {session.status}
+                      </span>
+                    </td>
+                    <td className="py-3 font-semibold text-slate-600">{recordsCount}</td>
+                    <td className="py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
+                    <td className="py-3 text-right space-x-3">
+                      <a
+                        href={`/admin/roster/sessions/${session.sessionId}/mapping`}
+                        className="text-brand-600 hover:text-brand-700 font-bold hover:underline"
+                      >
+                        View mapping
+                      </a>
+                      {session.status === "MAPPED" && (
+                        <button
+                          onClick={() => triggerMergeMutation.mutate(session.sessionId)}
+                          disabled={triggerMergeMutation.isPending}
+                          className="rounded-lg bg-slate-900 hover:bg-slate-800 px-2.5 py-1 text-[10px] font-bold text-white shadow-sm transition-all"
+                        >
+                          Re-trigger merge
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {(!sessionsData?.data || sessionsData?.data?.length === 0) && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-slate-400">
+                  <td colSpan={6} className="py-6 text-center text-slate-400">
                     No sessions found. Upload your first roster above.
                   </td>
                 </tr>

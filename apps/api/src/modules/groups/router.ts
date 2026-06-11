@@ -4,6 +4,9 @@
 
 import type { FastifyPluginAsync } from "fastify";
 import { requireAuth } from "../../middleware/requireAuth.js";
+import { requireGroupRole } from "../../middleware/requireGroupRole.js";
+import { db } from "../../config/db.js";
+
 import {
   CreateGroupSchema,
   UpdateGroupSchema,
@@ -159,6 +162,213 @@ export const groupsRouter: FastifyPluginAsync = async (fastify) => {
       return handleError(err, reply);
     }
   });
+
+  // DELETE /api/groups/:groupId/admin/posts/:contentId
+  fastify.delete(
+    "/:groupId/admin/posts/:contentId",
+    { preHandler: [requireAuth, requireGroupRole("MODERATOR")] },
+    async (request, reply) => {
+      const { groupId, contentId } = request.params as {
+        groupId: string;
+        contentId: string;
+      };
+
+      try {
+        const content = await db.content.findUnique({
+          where: { contentId },
+        });
+
+        if (!content) {
+          return reply.status(404).send({
+            error: "Content not found",
+            code: "NOT_FOUND",
+          });
+        }
+
+        if (content.groupId !== groupId) {
+          return reply.status(403).send({
+            error: "Content not in this group",
+            code: "CONTENT_GROUP_MISMATCH",
+          });
+        }
+
+        const existingMeta = (content.meta as Record<string, any>) || {};
+
+        await db.content.update({
+          where: { contentId },
+          data: {
+            body: "[Removed by moderator]",
+            title: null,
+            fileUrl: null,
+            previewUrl: null,
+            tags: [],
+            visibility: "GROUP",
+            meta: {
+              ...existingMeta,
+              moderationNote: "removed by moderator",
+            },
+          },
+        });
+
+        return reply.status(200).send({ data: { contentId } });
+      } catch (err: unknown) {
+        return handleError(err, reply);
+      }
+    }
+  );
+
+  // DELETE /api/groups/:groupId/admin/comments/:commentId
+  fastify.delete(
+    "/:groupId/admin/comments/:commentId",
+    { preHandler: [requireAuth, requireGroupRole("MODERATOR")] },
+    async (request, reply) => {
+      const { groupId, commentId } = request.params as {
+        groupId: string;
+        commentId: string;
+      };
+
+      try {
+        const comment = await db.postComment.findUnique({
+          where: { commentId },
+          include: {
+            content: {
+              select: { groupId: true },
+            },
+          },
+        });
+
+        if (!comment) {
+          return reply.status(404).send({
+            error: "Comment not found",
+            code: "NOT_FOUND",
+          });
+        }
+
+        if (comment.content.groupId !== groupId) {
+          return reply.status(403).send({
+            error: "Comment not in this group",
+            code: "COMMENT_GROUP_MISMATCH",
+          });
+        }
+
+        await db.postComment.update({
+          where: { commentId },
+          data: {
+            body: "[Removed by moderator]",
+          },
+        });
+
+        return reply.status(200).send({ data: { commentId } });
+      } catch (err: unknown) {
+        return handleError(err, reply);
+      }
+    }
+  );
+
+  // PUT /api/groups/:groupId/admin/members/:userId
+  fastify.put(
+    "/:groupId/admin/members/:userId",
+    { preHandler: [requireAuth, requireGroupRole("ADMIN")] },
+    async (request, reply) => {
+      const { groupId, userId } = request.params as {
+        groupId: string;
+        userId: string;
+      };
+      const { role } = request.body as { role?: string };
+
+      if (role !== "MEMBER" && role !== "MODERATOR" && role !== "ADMIN") {
+        return reply.status(400).send({
+          error: "Invalid role. Role must be MEMBER, MODERATOR, or ADMIN.",
+          code: "VALIDATION_ERROR",
+        });
+      }
+
+      try {
+        const exists = await db.groupMember.findUnique({
+          where: {
+            groupId_userId: {
+              groupId,
+              userId,
+            },
+          },
+        });
+
+        if (!exists) {
+          return reply.status(404).send({
+            error: "Group member not found",
+            code: "NOT_FOUND",
+          });
+        }
+
+        const updated = await db.groupMember.update({
+          where: {
+            groupId_userId: {
+              groupId,
+              userId,
+            },
+          },
+          data: {
+            role,
+          },
+        });
+
+        return reply.status(200).send({ data: { userId, role: updated.role } });
+      } catch (err: unknown) {
+        return handleError(err, reply);
+      }
+    }
+  );
+
+  // DELETE /api/groups/:groupId/admin/members/:userId
+  fastify.delete(
+    "/:groupId/admin/members/:userId",
+    { preHandler: [requireAuth, requireGroupRole("ADMIN")] },
+    async (request, reply) => {
+      if (!request.user) return;
+      const { groupId, userId } = request.params as {
+        groupId: string;
+        userId: string;
+      };
+
+      if (userId === request.user.userId) {
+        return reply.status(400).send({
+          error: "You cannot remove yourself from the group",
+          code: "VALIDATION_ERROR",
+        });
+      }
+
+      try {
+        const exists = await db.groupMember.findUnique({
+          where: {
+            groupId_userId: {
+              groupId,
+              userId,
+            },
+          },
+        });
+
+        if (!exists) {
+          return reply.status(404).send({
+            error: "Group member not found",
+            code: "NOT_FOUND",
+          });
+        }
+
+        await db.groupMember.delete({
+          where: {
+            groupId_userId: {
+              groupId,
+              userId,
+            },
+          },
+        });
+
+        return reply.status(200).send({ data: { userId } });
+      } catch (err: unknown) {
+        return handleError(err, reply);
+      }
+    }
+  );
 };
 
 async function handleError(err: unknown, reply: import("fastify").FastifyReply) {

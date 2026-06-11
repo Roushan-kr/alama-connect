@@ -192,13 +192,23 @@ export interface PendingRequest {
  */
 export async function getPendingRequests(
   networkId: string,
+  status?: "PENDING" | "UNDER_REVIEW" | "DECIDED",
   cursor?: string,
   limit = 20,
 ): Promise<{ requests: PendingRequest[]; nextCursor: string | null }> {
+  let statusFilter: any = { in: ["PENDING", "UNDER_REVIEW"] };
+  if (status === "PENDING") {
+    statusFilter = "PENDING";
+  } else if (status === "UNDER_REVIEW") {
+    statusFilter = "UNDER_REVIEW";
+  } else if (status === "DECIDED") {
+    statusFilter = { in: ["VERIFIED", "REJECTED"] };
+  }
+
   const requests = await db.verificationRequest.findMany({
     where: {
       networkId,
-      status: { in: ["PENDING", "UNDER_REVIEW"] },
+      status: statusFilter,
       ...(cursor ? { reqId: { lt: cursor } } : {}),
     },
     orderBy: { submittedAt: "asc" },

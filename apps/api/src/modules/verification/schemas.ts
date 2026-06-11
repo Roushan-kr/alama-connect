@@ -26,6 +26,7 @@ export type ReviewVerificationInput = z.infer<typeof ReviewVerificationSchema>;
 /** Pagination query for the admin queue. */
 export const VerificationListSchema = z.object({
   networkId: z.uuid(),
+  status: z.enum(["PENDING", "UNDER_REVIEW", "DECIDED"]).optional(),
   cursor: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
 });

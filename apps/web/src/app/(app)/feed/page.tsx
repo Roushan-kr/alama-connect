@@ -1,154 +1,152 @@
-"use client";
+"use client"
 
-import { useEffect, useRef, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest, ApiRequestError } from "@/lib/api-client";
-import { useAuthStore } from "@/store/auth";
+import { useEffect, useRef, useState } from "react"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { apiRequest, ApiRequestError } from "@/lib/api-client"
+import { useAuthStore } from "@/store/auth"
 
 interface FeedMediaItem {
-  mediaId: string;
-  url: string | null;
-  mediaType: string;
+  mediaId: string
+  url: string | null
+  mediaType: string
 }
 
 interface AuthorSummary {
-  userId: string;
-  username: string;
-  fullName: string | null;
-  headline: string | null;
-  profileImage: string | null;
+  userId: string
+  username: string
+  fullName: string | null
+  headline: string | null
+  profileImage: string | null
 }
 
 interface FeedItem {
-  contentId: string;
-  contentType: string;
-  networkId: string;
-  groupId: string | null;
-  title: string | null;
-  body: string | null;
-  tags: string[];
-  meta: Record<string, any>;
-  visibility: string;
-  isPinned: boolean;
-  createdAt: string;
-  author: AuthorSummary;
-  likesCount: number;
-  commentsCount: number;
-  userLiked: boolean;
-  media: FeedMediaItem[];
+  contentId: string
+  contentType: string
+  networkId: string
+  groupId: string | null
+  title: string | null
+  body: string | null
+  tags: string[]
+  meta: Record<string, any>
+  visibility: string
+  isPinned: boolean
+  createdAt: string
+  author: AuthorSummary
+  likesCount: number
+  commentsCount: number
+  userLiked: boolean
+  media: FeedMediaItem[]
 }
 
 interface FeedPage {
-  data: FeedItem[];
+  data: FeedItem[]
   meta: {
-    nextCursor: string | null;
-    hasMore: boolean;
-    limit: number;
-  };
+    nextCursor: string | null
+    hasMore: boolean
+    limit: number
+  }
 }
 
 export default function FeedPage() {
-  const queryClient = useQueryClient();
-  const { accessToken, user } = useAuthStore();
-  const [newPostBody, setNewPostBody] = useState("");
-  const [newPostTitle, setNewPostTitle] = useState("");
-  const [postError, setPostError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+  const queryClient = useQueryClient()
+  const { accessToken, user } = useAuthStore()
+  const [newPostBody, setNewPostBody] = useState("")
+  const [newPostTitle, setNewPostTitle] = useState("")
+  const [postError, setPostError] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
+  const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null)
 
-  const observerTarget = useRef<HTMLDivElement>(null);
+  const observerTarget = useRef<HTMLDivElement>(null)
 
   // Fetch Feed using useInfiniteQuery
-  const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    status,
-  } = useInfiniteQuery<FeedPage>({
-    queryKey: ["feed"],
-    queryFn: ({ pageParam = undefined }) =>
-      apiRequest<FeedPage>(`/api/feed/global?limit=10${pageParam ? `&cursor=${pageParam}` : ""}`, {
-        token: accessToken,
-      }),
-    initialPageParam: undefined,
-    getNextPageParam: (lastPage) => lastPage.meta.nextCursor,
-    enabled: !!accessToken,
-  });
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, status } =
+    useInfiniteQuery<FeedPage>({
+      queryKey: ["feed"],
+      queryFn: ({ pageParam = undefined }) =>
+        apiRequest<FeedPage>(
+          `/api/feed/global?limit=10${pageParam ? `&cursor=${pageParam}` : ""}`,
+          {
+            token: accessToken,
+          },
+        ),
+      initialPageParam: undefined,
+      getNextPageParam: (lastPage) => lastPage.meta.nextCursor,
+      enabled: !!accessToken,
+    })
 
   // Infinite Scroll Observer
   useEffect(() => {
-    if (!hasNextPage || isFetchingNextPage) return;
+    if (!hasNextPage || isFetchingNextPage) return
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0]?.isIntersecting) {
-          fetchNextPage();
+          fetchNextPage()
         }
       },
-      { threshold: 0.8 }
-    );
+      { threshold: 0.8 },
+    )
 
-    const currentTarget = observerTarget.current;
+    const currentTarget = observerTarget.current
     if (currentTarget) {
-      observer.observe(currentTarget);
+      observer.observe(currentTarget)
     }
 
     return () => {
       if (currentTarget) {
-        observer.unobserve(currentTarget);
+        observer.unobserve(currentTarget)
       }
-    };
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
   // Create Post Mutation
   const createPostMutation = useMutation({
     mutationFn: (body: { body: string; title?: string; networkId: string }) => {
-      const formData = new FormData();
-      formData.append("body", body.body);
-      if (body.title) formData.append("title", body.title);
-      formData.append("networkId", body.networkId);
+      const formData = new FormData()
+      formData.append("body", body.body)
+      if (body.title) formData.append("title", body.title)
+      formData.append("networkId", body.networkId)
       return apiRequest("/api/posts", {
         method: "POST",
         body: formData,
         token: accessToken,
-      });
+      })
     },
     onSuccess: () => {
-      setNewPostBody("");
-      setNewPostTitle("");
-      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      setNewPostBody("")
+      setNewPostTitle("")
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
     },
-  });
+  })
 
   const handleCreatePost = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPostBody.trim() || !user) return;
-    setCreating(true);
-    setPostError(null);
+    e.preventDefault()
+    if (!newPostBody.trim() || !user) return
+    setCreating(true)
+    setPostError(null)
 
     // Fetch user's first network membership from API or DB
     try {
-      const profileData: any = await apiRequest("/api/users/me", { token: accessToken });
-      const myNetworkId = profileData?.networkMemberships?.[0]?.networkId;
+      const profileData: any = await apiRequest("/api/users/me", { token: accessToken })
+      const myNetworkId = profileData?.networkMemberships?.[0]?.networkId
 
       if (!myNetworkId) {
-        setPostError("You must belong to a network to post.");
-        setCreating(false);
-        return;
+        setPostError("You must belong to a network to post.")
+        setCreating(false)
+        return
       }
 
       await createPostMutation.mutateAsync({
         body: newPostBody,
         networkId: myNetworkId,
         ...(newPostTitle ? { title: newPostTitle } : {}),
-      });
+      })
     } catch (err) {
-      setPostError("Failed to publish post");
+      setPostError("Failed to publish post")
     } finally {
-      setCreating(false);
+      setCreating(false)
     }
-  };
+  }
 
   // Toggle Like Mutation
   const toggleLikeMutation = useMutation({
@@ -158,9 +156,9 @@ export default function FeedPage() {
         token: accessToken,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
     },
-  });
+  })
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
@@ -209,93 +207,130 @@ export default function FeedPage() {
 
         {status === "success" && (
           <div className="space-y-6">
-            {data.pages.flatMap((page) => page.data).map((post) => (
-              <div key={post.contentId} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm relative">
-                {/* Content Type Badge */}
-                <div className="absolute right-6 top-6">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                    {post.contentType}
-                  </span>
-                </div>
-
-                {/* Card Header */}
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-brand-800 font-semibold uppercase text-sm">
-                    {post.author.username.substring(0, 2)}
+            {data.pages
+              .flatMap((page) => page.data)
+              .map((post) => (
+                <div
+                  key={post.contentId}
+                  className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm relative"
+                >
+                  {/* Content Type Badge */}
+                  <div className="absolute right-6 top-6">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                      {post.contentType}
+                    </span>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-slate-900">
-                      {post.author.fullName ?? `@${post.author.username}`}
-                    </h3>
-                    <p className="text-xs text-slate-500">{post.author.headline || "Alumni Member"}</p>
+
+                  {/* Card Header */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-100 text-brand-800 font-semibold uppercase text-sm">
+                      {post.author.username.substring(0, 2)}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {post.author.fullName ?? `@${post.author.username}`}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        {post.author.headline || "Alumni Member"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Card Body */}
+                  <div className="mt-4 space-y-2">
+                    {post.title && (
+                      <h4 className="text-base font-semibold text-slate-900">{post.title}</h4>
+                    )}
+                    <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {post.body}
+                    </p>
+                  </div>
+
+                  {/* Render Post Media Images */}
+                  {post.media.length > 0 && (
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      {post.media.map((m) => (
+                        <div
+                          key={m.mediaId}
+                          className="relative aspect-video w-full overflow-hidden rounded-xl border border-slate-100 bg-slate-50"
+                        >
+                          {m.url && (
+                            <img
+                              src={m.url}
+                              alt="Media attachment"
+                              className="h-full w-full object-cover"
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tags */}
+                  {post.tags.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-1.5">
+                      {post.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="text-[11px] font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-md"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Action Buttons Footer */}
+                  <div className="mt-6 flex items-center gap-6 border-t border-slate-100 pt-4">
+                    <button
+                      onClick={() =>
+                        toggleLikeMutation.mutate({
+                          contentId: post.contentId,
+                          userLiked: post.userLiked,
+                        })
+                      }
+                      className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${
+                        post.userLiked ? "text-red-500" : "text-slate-500 hover:text-red-500"
+                      }`}
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        fill={post.userLiked ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"
+                        />
+                      </svg>
+                      <span>{post.likesCount}</span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveCommentPostId(post.contentId)}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth="2"
+                          d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+                        />
+                      </svg>
+                      <span>{post.commentsCount} Comments</span>
+                    </button>
                   </div>
                 </div>
-
-                {/* Card Body */}
-                <div className="mt-4 space-y-2">
-                  {post.title && <h4 className="text-base font-semibold text-slate-900">{post.title}</h4>}
-                  <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{post.body}</p>
-                </div>
-
-                {/* Render Post Media Images */}
-                {post.media.length > 0 && (
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    {post.media.map((m) => (
-                      <div key={m.mediaId} className="relative aspect-video w-full overflow-hidden rounded-xl border border-slate-100 bg-slate-50">
-                        {m.url && (
-                          <img
-                            src={m.url}
-                            alt="Media attachment"
-                            className="h-full w-full object-cover"
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Tags */}
-                {post.tags.length > 0 && (
-                  <div className="mt-4 flex flex-wrap gap-1.5">
-                    {post.tags.map((tag) => (
-                      <span key={tag} className="text-[11px] font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-md">
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Action Buttons Footer */}
-                <div className="mt-6 flex items-center gap-6 border-t border-slate-100 pt-4">
-                  <button
-                    onClick={() =>
-                      toggleLikeMutation.mutate({
-                        contentId: post.contentId,
-                        userLiked: post.userLiked,
-                      })
-                    }
-                    className={`flex items-center gap-1.5 text-xs font-semibold transition-colors ${
-                      post.userLiked ? "text-red-500" : "text-slate-500 hover:text-red-500"
-                    }`}
-                  >
-                    <svg className="h-4 w-4" fill={post.userLiked ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
-                    </svg>
-                    <span>{post.likesCount}</span>
-                  </button>
-
-                  <button
-                    onClick={() => setActiveCommentPostId(post.contentId)}
-                    className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 transition-colors"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                    <span>{post.commentsCount} Comments</span>
-                  </button>
-                </div>
-              </div>
-            ))}
+              ))}
 
             {/* Sentinel div for infinite scroll */}
             <div ref={observerTarget} className="flex justify-center py-4">
@@ -327,25 +362,25 @@ export default function FeedPage() {
         />
       )}
     </div>
-  );
+  )
 }
 
 // Comments Drawer Component
 interface Comment {
-  commentId: string;
-  body: string;
-  createdAt: string;
+  commentId: string
+  body: string
+  createdAt: string
   user: {
-    username: string;
-    profile: { fullName: string | null } | null;
-  };
+    username: string
+    profile: { fullName: string | null } | null
+  }
 }
 
 function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: () => void }) {
-  const { accessToken } = useAuthStore();
-  const queryClient = useQueryClient();
-  const [commentText, setCommentText] = useState("");
-  const [posting, setPosting] = useState(false);
+  const { accessToken } = useAuthStore()
+  const queryClient = useQueryClient()
+  const [commentText, setCommentText] = useState("")
+  const [posting, setPosting] = useState(false)
 
   // Fetch comments
   const { data: comments = [], isLoading } = useQuery<Comment[]>({
@@ -354,7 +389,7 @@ function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: ()
       apiRequest<Comment[]>(`/api/posts/${contentId}/comments`, {
         token: accessToken,
       }),
-  });
+  })
 
   // Post comment mutation
   const postCommentMutation = useMutation({
@@ -365,24 +400,24 @@ function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: ()
         token: accessToken,
       }),
     onSuccess: () => {
-      setCommentText("");
-      queryClient.invalidateQueries({ queryKey: ["comments", contentId] });
-      queryClient.invalidateQueries({ queryKey: ["feed"] });
+      setCommentText("")
+      queryClient.invalidateQueries({ queryKey: ["comments", contentId] })
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
     },
-  });
+  })
 
   const handlePostComment = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentText.trim()) return;
-    setPosting(true);
+    e.preventDefault()
+    if (!commentText.trim()) return
+    setPosting(true)
     try {
-      await postCommentMutation.mutateAsync(commentText);
+      await postCommentMutation.mutateAsync(commentText)
     } catch (err) {
-      console.error(err);
+      console.error(err)
     } finally {
-      setPosting(false);
+      setPosting(false)
     }
-  };
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/40">
@@ -392,7 +427,12 @@ function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: ()
           <h3 className="text-base font-semibold text-slate-900">Comments</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:bg-slate-50">
             <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -406,7 +446,9 @@ function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: ()
           )}
 
           {!isLoading && comments.length === 0 && (
-            <p className="text-center text-xs text-slate-400 py-8">No comments yet. Share your thoughts!</p>
+            <p className="text-center text-xs text-slate-400 py-8">
+              No comments yet. Share your thoughts!
+            </p>
           )}
 
           {!isLoading &&
@@ -450,5 +492,5 @@ function CommentsDrawer({ contentId, onClose }: { contentId: string; onClose: ()
         </form>
       </div>
     </div>
-  );
+  )
 }

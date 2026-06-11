@@ -14,6 +14,8 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { jwtVerify } from "jose";
 import { env } from "../config/env.js";
 import { db } from "../config/db.js";
+import { redis } from "../config/redis.js";
+
 
 /** Shape of the decoded JWT access token payload. */
 export interface JwtUser {
@@ -23,12 +25,8 @@ export interface JwtUser {
   globalRole: string;
 }
 
-// Augment FastifyRequest so `request.user` is typed everywhere.
-declare module "fastify" {
-  interface FastifyRequest {
-    user?: JwtUser;
-  }
-}
+// Augmentations are located in src/types/fastify.d.ts
+
 
 const secret = new TextEncoder().encode(env.JWT_SECRET);
 
@@ -69,11 +67,43 @@ export async function requireAuth(
       username: payload["username"] as string,
       globalRole: payload["globalRole"] as string,
     };
-  } catch {
+  } catch (err) {
     return reply.status(401).send({
       error: "Invalid or expired access token",
       code: "UNAUTHORIZED",
     });
+  }
+
+  const userId = request.user.userId;
+  const redisKey = `user:disabled:${userId}`;
+
+  try {
+    const cachedStatus = await redis.get(redisKey);
+
+    if (cachedStatus === "1") {
+      return reply.status(403).send({
+        error: "Account disabled",
+        code: "ACCOUNT_DISABLED",
+      });
+    }
+
+    if (cachedStatus === null) {
+      const settings = await db.userSettings.findUnique({
+        where: { userId },
+        select: { disabledAt: true },
+      });
+
+      if (settings?.disabledAt) {
+        await redis.setex(redisKey, 60, "1");
+        return reply.status(403).send({
+          error: "Account disabled",
+          code: "ACCOUNT_DISABLED",
+        });
+      }
+    }
+  } catch (err) {
+    request.log.error({ err, userId }, "Failed to check disabled status in requireAuth");
+    throw err;
   }
 }
 

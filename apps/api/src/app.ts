@@ -30,6 +30,8 @@ import { searchRouter } from "./modules/search/router.js"
 import { presenceRouter } from "./modules/presence/router.js"
 import { adminRouter } from "./modules/admin/router.js"
 import { rosterRouter } from "./modules/roster/router.js"
+import { superAdminRouter } from "./modules/superAdmin/router.js"
+import { memberManagementRouter } from "./modules/admin/memberManagement.router.js"
 import { nowISO } from "@alumni/shared"
 
 
@@ -140,6 +142,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(presenceRouter, { prefix: "/api/presence" })
   await app.register(adminRouter, { prefix: "/api/admin" })
   await app.register(rosterRouter, { prefix: "/api/admin/roster" })
+  await app.register(superAdminRouter, { prefix: "/api/admin/super" })
+  await app.register(memberManagementRouter, { prefix: "/api/admin/network/:networkId" })
 
   return app
 }

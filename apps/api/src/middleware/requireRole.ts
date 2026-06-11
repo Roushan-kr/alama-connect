@@ -36,6 +36,10 @@ export function requireRole(
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<void> {
+    if (request.user?.globalRole === "SUPER_ADMIN") {
+      return;
+    }
+
     if (!request.user) {
       return reply.status(401).send({
         error: "Authentication required",
@@ -113,3 +117,38 @@ export function requireAdmin(paramName = "networkId") {
 export function requireAdminOrFaculty() {
   return requireRole("body", ["ADMIN", "FACULTY"]);
 }
+
+/**
+ * Asserts that the calling user is an ADMIN of the specified network.
+ * Bypasses checks for SUPER_ADMINs.
+ * Throws a Fastify-compatible 403 error on failure.
+ */
+export async function assertNetworkAdmin(
+  userId: string,
+  networkId: string,
+  globalRole?: string,
+): Promise<void> {
+  if (globalRole === "SUPER_ADMIN") return;
+
+  const membership = await db.networkMember.findUnique({
+    where: {
+      userId_networkId: {
+        userId,
+        networkId,
+      },
+    },
+    select: { role: true, status: true },
+  });
+
+  if (
+    !membership ||
+    membership.status !== "VERIFIED" ||
+    membership.role !== "ADMIN"
+  ) {
+    throw Object.assign(new Error("Access restricted to network administrators"), {
+      statusCode: 403,
+      code: "FORBIDDEN",
+    });
+  }
+}
+
