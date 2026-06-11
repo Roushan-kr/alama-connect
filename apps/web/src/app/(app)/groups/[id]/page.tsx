@@ -66,6 +66,9 @@ export default function GroupPage() {
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  const [memberSearchQuery, setMemberSearchQuery] = useState("");
+  const [selectedUsers, setSelectedUsers] = useState<any[]>([]);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const observerTarget = useRef<HTMLDivElement>(null);
 
@@ -75,6 +78,36 @@ export default function GroupPage() {
     queryFn: () => apiRequest<GroupDetails>(`/api/groups/${groupId}`, { token: accessToken }),
     enabled: !!accessToken && !!groupId,
   });
+
+  // Search network members
+  const { data: searchResults, isFetching: isSearching } = useQuery<any>({
+    queryKey: ["networkUserSearch", group?.networkId, memberSearchQuery],
+    queryFn: () =>
+      apiRequest<any>(
+        `/api/search?networkId=${group?.networkId}&type=users&q=${encodeURIComponent(memberSearchQuery)}&limit=15`,
+        { token: accessToken }
+      ),
+    enabled: !!accessToken && !!group?.networkId && memberSearchQuery.trim().length >= 2,
+  });
+
+  // Fetch discoverable peers for initial list
+  const { data: initialPeers, isFetching: isLoadingInitial } = useQuery<any>({
+    queryKey: ["networkDiscoverPeers", group?.networkId],
+    queryFn: () =>
+      apiRequest<any>(
+        `/api/connections/discover?networkId=${group?.networkId}&limit=50`,
+        { token: accessToken }
+      ),
+    enabled: !!accessToken && !!group?.networkId,
+  });
+
+  const usersToDisplay = memberSearchQuery.trim().length >= 2
+    ? (searchResults?.data || [])
+    : (initialPeers?.data || []).map((p: any) => ({
+        id: p.userId,
+        title: p.profile?.fullName || p.username,
+        metadata: { username: p.username }
+      }));
 
   const isMember = group?.role !== null;
   const isAdmin = group?.role === "ADMIN" || group?.role === "MODERATOR";
@@ -214,6 +247,37 @@ export default function GroupPage() {
     inviteMemberMutation.mutate(inviteUserId);
   };
 
+  const [isInvitingSelected, setIsInvitingSelected] = useState(false);
+
+  const handleInviteSelected = async () => {
+    if (selectedUsers.length === 0) return;
+    setIsInvitingSelected(true);
+    setInviteError(null);
+    setInviteSuccess(false);
+
+    try {
+      await Promise.all(
+        selectedUsers.map((u) =>
+          apiRequest(`/api/groups/${groupId}/members/invite`, {
+            method: "POST",
+            token: accessToken,
+            body: { userId: u.id },
+          })
+        )
+      );
+
+      setInviteSuccess(true);
+      setSelectedUsers([]);
+      setMemberSearchQuery("");
+      queryClient.invalidateQueries({ queryKey: ["groupMembers", groupId] });
+      setTimeout(() => setInviteSuccess(false), 3000);
+    } catch (err: any) {
+      setInviteError(err.message || "Failed to invite some users");
+    } finally {
+      setIsInvitingSelected(false);
+    }
+  };
+
   if (groupStatus === "pending") {
     return <div className="text-center py-12 text-slate-400">Loading group details...</div>;
   }
@@ -350,27 +414,132 @@ export default function GroupPage() {
             {isAdmin && (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <h3 className="text-sm font-bold text-slate-900">Invite Members</h3>
-                <p className="text-xs text-slate-500">Add other network members to this group via their User ID.</p>
                 
-                <form onSubmit={handleInvite} className="space-y-3">
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter User UUID..."
-                    value={inviteUserId}
-                    onChange={(e) => setInviteUserId(e.target.value)}
-                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-brand-500"
-                  />
-                  {inviteError && <p className="text-[10px] text-red-600">{inviteError}</p>}
-                  {inviteSuccess && <p className="text-[10px] text-green-600">User invited successfully!</p>}
+                {/* Selected User Tags */}
+                {selectedUsers.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 p-1 bg-slate-50 rounded-xl border border-slate-100 max-h-24 overflow-y-auto">
+                    {selectedUsers.map((u) => (
+                      <span
+                        key={u.id}
+                        className="inline-flex items-center gap-1 rounded-full bg-brand-50 border border-brand-100 px-2 py-0.5 text-[10px] font-bold text-brand-700"
+                      >
+                        {u.name}
+                        <button
+                          type="button"
+                          onClick={() => setSelectedUsers((prev) => prev.filter((x) => x.id !== u.id))}
+                          className="hover:text-brand-900 font-extrabold cursor-pointer ml-0.5"
+                        >
+                          ✕
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="space-y-3 relative">
+                  {isDropdownOpen && (
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setIsDropdownOpen(false)}
+                    />
+                  )}
+                  <div className="relative z-20">
+                    <input
+                      type="text"
+                      placeholder="Search name or username..."
+                      value={memberSearchQuery}
+                      onFocus={() => setIsDropdownOpen(true)}
+                      onChange={(e) => {
+                        setMemberSearchQuery(e.target.value);
+                        setIsDropdownOpen(true);
+                      }}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-brand-500 pr-8"
+                    />
+                    {isSearching && (
+                      <span className="absolute right-2.5 top-2.5 h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand-600 border-t-transparent" />
+                    )}
+                    {!isSearching && memberSearchQuery && (
+                      <button
+                        onClick={() => {
+                          setMemberSearchQuery("");
+                          setIsDropdownOpen(false);
+                        }}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-650 text-xs font-bold cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Dropdown Options */}
+                  {isDropdownOpen && (
+                    <div className="absolute z-20 mt-1 w-full rounded-xl border border-slate-200 bg-white shadow-lg max-h-48 overflow-y-auto divide-y divide-slate-100">
+                      {isSearching || (memberSearchQuery.trim().length < 2 && isLoadingInitial) ? (
+                        <div className="p-3 text-center text-xs text-slate-400 animate-pulse font-medium">
+                          Loading members...
+                        </div>
+                      ) : usersToDisplay.length === 0 ? (
+                        <div className="p-3 text-center text-xs text-slate-500">
+                          No members found
+                        </div>
+                      ) : (
+                        (() => {
+                          const nonGroupMembers = usersToDisplay.filter(
+                            (item: any) =>
+                              !members.some((m) => m.userId === item.id) &&
+                              !selectedUsers.some((u) => u.id === item.id)
+                          );
+
+                          if (nonGroupMembers.length === 0) {
+                            return (
+                              <div className="p-3 text-center text-xs text-slate-500">
+                                All matches already selected or in group
+                              </div>
+                            );
+                          }
+
+                          return nonGroupMembers.map((item: any) => (
+                            <div
+                              key={item.id}
+                              onClick={() => {
+                                setSelectedUsers((prev) => [
+                                  ...prev,
+                                  {
+                                    id: item.id,
+                                    name: item.title,
+                                    username: item.metadata?.username || "",
+                                  },
+                                ]);
+                                setMemberSearchQuery("");
+                                setIsDropdownOpen(false);
+                              }}
+                              className="p-2.5 hover:bg-slate-50 transition cursor-pointer text-xs flex flex-col text-left"
+                            >
+                              <span className="font-bold text-slate-800">{item.title}</span>
+                              {item.metadata?.username && (
+                                <span className="text-[10px] text-slate-450">@{item.metadata.username}</span>
+                              )}
+                            </div>
+                          ));
+                        })()
+                      )}
+                    </div>
+                  )}
+
+                  {inviteError && <p className="text-[10px] text-red-650 font-medium">{inviteError}</p>}
+                  {inviteSuccess && <p className="text-[10px] text-green-650 font-bold">Invitations sent successfully!</p>}
+
                   <button
-                    type="submit"
-                    disabled={inviteMemberMutation.isPending}
-                    className="w-full rounded-xl bg-slate-900 py-2 text-center text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:opacity-60 transition"
+                    type="button"
+                    onClick={handleInviteSelected}
+                    disabled={selectedUsers.length === 0 || isInvitingSelected}
+                    className="w-full rounded-xl bg-brand-600 hover:bg-brand-700 py-2.5 text-center text-xs font-bold text-white shadow-sm transition disabled:opacity-60 cursor-pointer z-20 relative"
                   >
-                    Send Invitation
+                    {isInvitingSelected
+                      ? "Sending Invitations..."
+                      : `Invite Selected (${selectedUsers.length})`}
                   </button>
-                </form>
+                </div>
               </div>
             )}
 
