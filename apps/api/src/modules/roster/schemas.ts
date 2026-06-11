@@ -50,3 +50,14 @@ export type CreateCampaignInput = z.infer<typeof CreateCampaignSchema>
 export const SendCampaignSchema = z.object({
   campaignId: z.uuid(),
 })
+
+export const ConflictResolutionSchema = z.object({
+  resolutions: z.array(
+    z.object({
+      rowIndex: z.number().int().positive(),
+      decision: z.enum(['ACCEPT_INCOMING', 'KEEP_EXISTING', 'SKIP_ROW']),
+    })
+  ),
+  confirmRemoval: z.boolean().optional(),
+})
+export type ConflictResolutionInput = z.infer<typeof ConflictResolutionSchema>

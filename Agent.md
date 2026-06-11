@@ -154,6 +154,16 @@ Use these commands from the monorepo root:
 * [x] **Wave D: Admin Analytics & Announcements**: Cached metrics in Redis (5m TTL + jitter), keyset-paginated Trigger.dev task dispatches, and Admin forms.
 * [x] **Wave E: Frontend UI Views**: `/search` workspace, `/connections` network manager, `/admin` dashboard panel, and active green dot status indicators.
 
+### Phase 4.5 & Phase 2.5-Admin — Unified Admin Management Console (API & Web Complete)
+* [x] **Step A: Middleware & Type Consolidation**: Consolidate global `FastifyRequest` properties into `fastify.d.ts` and implement weights-based `requireGroupRole` guard.
+* [x] **Step B: Group Moderation API**: Implement post/comment soft-deletion (modify body/meta in-place) and cross-group ownership verification.
+* [x] **Step C: Super Admin API & Self-Correction**: Add `disabledAt`/`disabledReason` to `UserSettings` with local SQL migration file, startup auto-migration guard, and `requireAuth` cache.
+* [x] **Step D: Verification Queue UI & Presigned URLs**: Secure `GET /admin/:reqId/document-url` presigned URL generation and React verification queue dashboard with review modals.
+* [x] **Step E: Member Management API & UI Console**: Role edits, user removal, and bulk action floating panel.
+* [x] **Step F: Roster Upload UI Extension**: Drag-and-drop file upload, upload logs history, and header-to-template column mapping page.
+* [x] **Step G: Super Admin Control Panel**: Condo-tabs rendering, right-drawer admins panel, Metrics cards auto-refreshing (60s TTL), and user search block list.
+* [x] **Step H: Admin Layout & Context**: `<AdminNetworkProvider>` context and sidebar navigation.
+
 ---
 
 ## 🧠 TypeScript / Import Session Learnings
@@ -172,13 +182,34 @@ Keep these guidelines in mind to avoid repeating past development mistakes:
 ## ⚡ Current Session State & Focus Log
 
 ### 🎯 Current Focus
-1. **Phase 1.3 - Admin Roster Management & Email Campaigns:**
-   - Completed execution of schema migrations, sanitizer utilities, Trigger.dev tasks, Fastify routes, and React query dashboard views. Next build compiles 100% cleanly.
+1. **Roster Integration & Auto-Verification:**
+   - Completed the auto-verification logic for users who register or verify using their institutional roster records. Resolved conflict mapping resolution bugs and search network restrictions for Super Admin.
 
 ### ⚠️ Current Blockers & Risks
-* None. All roster management systems and campaign triggers are operational and verified.
+* None.
 
 ### 📝 Change Log & Session Notes
+* **2026-06-11 (Roster Integration & Auto-Verification Complete):**
+  - Implemented auto-verification logic in `register` (`apps/api/src/modules/auth/service.ts`) and `submitVerification` (`apps/api/src/modules/verification/service.ts`). Users selecting `ENTRY_NUMBER` who match an active, non-removed roster record are immediately marked as `VERIFIED` (`NetworkMember.status = 'VERIFIED'` and `VerificationRequest.status = 'VERIFIED'`).
+  - Automatically created a verified `Education` entry (`isVerified = true`) for auto-verified users, mapping the roster record's `branch` to `degree` and `batch` to `endYear`.
+  - Added user notification triggers (`notifyUserVerificationOutcome`) immediately on auto-verification when submitted post-registration, and bypassed admin notifications.
+  - Relaxed Zod `.min(1)` in `ConflictResolutionSchema` to allow saving removal confirmations.
+  - Resolved Redis HSET crash on empty resolutions in conflicts resolution route (`POST /sessions/:sessionId/conflicts/resolve`).
+  - Corrected conflicts endpoint to gracefully return 200 with empty rows instead of 404 once merged.
+  - Replaced SQL `$executeRaw` `unnest` query with a standard Prisma loop-based `upsert` in `mergeRosterRecords` task, preventing array-binding casting errors.
+  - Upgraded frontend `apiRequest` parser to support empty body returns (e.g. 204 or 202) by reading text first.
+  - Added `SUPER_ADMIN` check bypass in search router to allow super admins to perform searches without checking network memberships.
+* **2026-06-11 (Admin Management Console Phase 4.5 & Phase 2.5-Admin Complete):**
+  - Consolidated all FastifyRequest types globally inside `fastify.d.ts` and created `requireGroupRole` middleware.
+  - Implemented soft-deletion for group posts/comments and cross-group post/comment ownership validation.
+  - Created Super Admin user disabling, admin lists demotion/management, and metrics endpoints under `/api/admin/super`.
+  - Added dynamic database auto-migration on server startup to verify/add `disabled_at` and `disabled_reason` columns to the `user_settings` table.
+  - Separated token signature decoding from database/Redis checks in `requireAuth` to prevent database schema errors from masking as a generic 401 token invalidation.
+  - Created Presigned Document URL route and Verification queue dashboard with tabs, review dialogs, and skeletons.
+  - Built Member Management list with bulk actions, inline edits, and filter query.
+  - Added drag-drop Roster uploads and session template mappings.
+  - Integrated conditional tab rendering for Super Admin metrics, user search, and admins side-drawer.
+  - Implemented `<AdminNetworkProvider>` context and sidebar navigation.
 * **2026-06-04 (Phase 1.3 Complete):**
   - Implemented Excel/CSV parsing (max 50k rows), client mapping screen, delta-merge sequential transaction upserts, and filtered campaign template broadcasts.
   - Resolved Fastify route handler typing issues and exactOptionalPropertyTypes strict errors. Production compilation build checks out perfectly.

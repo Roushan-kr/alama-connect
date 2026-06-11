@@ -23,22 +23,24 @@ export const searchRouter: FastifyPluginAsync = async (fastify) => {
 
     const { q, networkId, type, limit, cursor } = parsed.data;
 
-    // Verify network membership
-    const membership = await db.networkMember.findUnique({
-      where: {
-        userId_networkId: {
-          userId: request.user.userId,
-          networkId,
+    // Verify network membership (bypass for SUPER_ADMIN)
+    if (request.user.globalRole !== "SUPER_ADMIN") {
+      const membership = await db.networkMember.findUnique({
+        where: {
+          userId_networkId: {
+            userId: request.user.userId,
+            networkId,
+          },
         },
-      },
-      select: { status: true },
-    });
-
-    if (!membership || membership.status !== "VERIFIED") {
-      return reply.status(403).send({
-        error: "Access restricted to verified network members only",
-        code: "FORBIDDEN",
+        select: { status: true },
       });
+
+      if (!membership || membership.status !== "VERIFIED") {
+        return reply.status(403).send({
+          error: "Access restricted to verified network members only",
+          code: "FORBIDDEN",
+        });
+      }
     }
 
     try {

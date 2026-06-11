@@ -4,6 +4,7 @@
  */
 
 import type { ApiError, ApiSuccess } from "@alumni/shared";
+import { useAuthStore } from "@/store/auth";
 
 const API_BASE =
   process.env["NEXT_PUBLIC_API_URL"]?.replace(/\/$/, "") ??
@@ -25,6 +26,31 @@ export interface RequestOptions extends Omit<RequestInit, "body"> {
   token?: string | null;
 }
 
+let refreshPromise: Promise<string | null> | null = null;
+
+async function performRefresh(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (!res.ok) {
+      throw new Error("Refresh failed");
+    }
+    const json = await res.json();
+    const data = json.data; // { accessToken: string, expiresAt: string }
+    
+    const store = useAuthStore.getState();
+    if (store.user) {
+      store.setSession(data.accessToken, data.expiresAt, store.user);
+    }
+    return data.accessToken;
+  } catch (err) {
+    useAuthStore.getState().clearSession();
+    return null;
+  }
+}
+
 export async function apiRequest<T>(
   path: string,
   options: RequestOptions = {},
@@ -35,8 +61,12 @@ export async function apiRequest<T>(
   if (body !== undefined && !(body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
+
+  // Always use the latest token from the store if logged in, falling back to option token
+  const storeToken = useAuthStore.getState().accessToken;
+  const activeToken = storeToken || token;
+  if (activeToken) {
+    headers.set("Authorization", `Bearer ${activeToken}`);
   }
 
   const fetchOptions: RequestInit = {
@@ -51,7 +81,42 @@ export async function apiRequest<T>(
 
   const res = await fetch(`${API_BASE}${path}`, fetchOptions);
 
-  const json = (await res.json()) as ApiSuccess<T> | ApiError | T;
+  // If unauthorized and we have a token, attempt automatic token refresh
+  if (res.status === 401 && activeToken) {
+    if (!refreshPromise) {
+      refreshPromise = performRefresh().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const newAccessToken = await refreshPromise;
+    if (newAccessToken) {
+      headers.set("Authorization", `Bearer ${newAccessToken}`);
+      const retryRes = await fetch(`${API_BASE}${path}`, {
+        ...fetchOptions,
+        headers,
+      });
+      const retryText = await retryRes.text();
+      const retryJson = retryText ? JSON.parse(retryText) : {};
+      if (retryRes.ok) {
+        if (retryJson !== null && typeof retryJson === "object" && "data" in retryJson) {
+          const keys = Object.keys(retryJson);
+          if (keys.length === 1 && keys[0] === "data") {
+            return (retryJson as ApiSuccess<T>).data;
+          }
+        }
+        return retryJson as T;
+      }
+      const err = retryJson as ApiError;
+      throw new ApiRequestError(
+        err.error ?? retryRes.statusText,
+        err.code ?? "REQUEST_FAILED",
+        retryRes.status,
+      );
+    }
+  }
+
+  const text = await res.text();
+  const json = text ? JSON.parse(text) : {};
 
   if (!res.ok) {
     const err = json as ApiError;

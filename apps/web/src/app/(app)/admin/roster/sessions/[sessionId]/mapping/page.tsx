@@ -35,12 +35,14 @@ export default function RosterMappingPage({
       }),
     enabled: !!accessToken && !!sessionId,
     refetchInterval: (query) => {
-      const status = query.state.data?.data?.status;
+      const data = query.state.data;
+      const sess = data?.data || data;
+      const status = sess?.status;
       return status === "PENDING" || status === "SANITIZING" || status === "MERGING" ? 1500 : false;
     },
   });
 
-  const session = sessionData?.data;
+  const session = sessionData?.data || sessionData;
 
   // Auto-fill or sync mappings
   useEffect(() => {
@@ -106,7 +108,8 @@ export default function RosterMappingPage({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["roster-session", sessionId] });
       setSaveError(null);
-      alert("Mappings saved successfully!");
+      // Redirect to review page — analysis will start in background
+      router.push(`/admin/roster/sessions/${sessionId}/review`);
     },
     onError: (err: any) => {
       setSaveError(err.message || "Failed to save column mappings");
@@ -125,6 +128,17 @@ export default function RosterMappingPage({
     },
     onError: (err: any) => {
       alert("Failed to confirm merge: " + err.message);
+    },
+  });
+
+  const retriggerMutation = useMutation({
+    mutationFn: () =>
+      apiRequest(`/api/admin/roster/sessions/${sessionId}/retrigger-sanitize`, {
+        method: "POST",
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["roster-session", sessionId] });
     },
   });
 
@@ -166,6 +180,49 @@ export default function RosterMappingPage({
       <div className="space-y-6 animate-pulse">
         <div className="h-16 rounded-2xl bg-white border border-slate-200" />
         <div className="h-40 rounded-2xl bg-white border border-slate-200" />
+      </div>
+    );
+  }
+
+  // Show processing state when file is being sanitized
+  if (session.status === "PENDING" || session.status === "SANITIZING") {
+    return (
+      <div className="space-y-6">
+        {/* Session Title */}
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-bold tracking-tight text-slate-900">Roster Import Session</h1>
+          <p className="text-xs text-slate-500 mt-1">
+            File: <span className="font-semibold text-slate-700">{session.originalName}</span> &bull; Status:{" "}
+            <span className="font-extrabold text-amber-600 uppercase">{session.status}</span>
+          </p>
+        </div>
+
+        {/* Processing Card */}
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/50 p-10 text-center space-y-4">
+          <div className="flex items-center justify-center">
+            <div className="h-10 w-10 animate-spin rounded-full border-4 border-amber-400 border-t-transparent" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-amber-900">
+              {session.status === "SANITIZING" ? "Sanitizing roster file..." : "Processing upload..."}
+            </p>
+            <p className="text-xs text-amber-700 mt-1">
+              This usually takes 5–15 seconds. The page will refresh automatically.
+            </p>
+          </div>
+          <button
+            onClick={() => retriggerMutation.mutate()}
+            disabled={retriggerMutation.isPending}
+            className="mx-auto flex items-center gap-1.5 rounded-lg border border-amber-200 bg-white px-4 py-2 text-xs font-bold text-amber-800 hover:bg-amber-50 transition-all disabled:opacity-50"
+          >
+            {retriggerMutation.isPending ? "Retrying..." : "⟳ Stuck? Click to retry"}
+          </button>
+          {retriggerMutation.isError && (
+            <p className="text-xs text-red-600 font-semibold">
+              Retry failed: {(retriggerMutation.error as any)?.message}
+            </p>
+          )}
+        </div>
       </div>
     );
   }

@@ -81,19 +81,20 @@ export async function submitVerification(
 
   let finalEntryNumber: string | null = null;
   let autoAdminNotes: string | null = null;
+  let rosterRecord: any = null;
+  let autoVerified = false;
 
   // ── ENTRY_NUMBER validation against roster_records ─────────────────────────
   if (input.method === "ENTRY_NUMBER" && input.entryNumber) {
     const normalized = normalizeEntryNumber(input.entryNumber);
     finalEntryNumber = normalized;
 
-    const rosterRecord = await db.rosterRecord.findFirst({
+    rosterRecord = await db.rosterRecord.findFirst({
       where: {
         networkId: input.networkId,
         entryNumber: normalized,
         removedFromRoster: false,
       },
-      select: { recordId: true },
     });
 
     if (!rosterRecord) {
@@ -104,6 +105,7 @@ export async function submitVerification(
     }
 
     autoAdminNotes = `[auto] Matched roster_record: ${rosterRecord.recordId}`;
+    autoVerified = true;
   }
 
   // ── STEP 1: Virus scan (BEFORE any storage) ───────────────────────────────
@@ -143,17 +145,30 @@ export async function submitVerification(
       method: input.method,
       entryNumber: finalEntryNumber,
       documentUrl: documentUrl ?? null,
-      status: "PENDING",
+      status: autoVerified ? "VERIFIED" : "PENDING",
       adminNotes: autoAdminNotes,
+      reviewedAt: autoVerified ? new Date() : null,
     },
   });
 
   // Ensure network_member row exists (created during onboarding step).
   await db.networkMember.upsert({
     where: { userId_networkId: { userId, networkId: input.networkId } },
-    create: { userId, networkId: input.networkId, status: "PENDING" },
-    update: { status: "PENDING" },
+    create: { userId, networkId: input.networkId, status: autoVerified ? "VERIFIED" : "PENDING" },
+    update: { status: autoVerified ? "VERIFIED" : "PENDING" },
   });
+
+  if (autoVerified && rosterRecord) {
+    await db.education.create({
+      data: {
+        userId,
+        networkId: input.networkId,
+        degree: rosterRecord.branch,
+        endYear: rosterRecord.batch,
+        isVerified: true,
+      },
+    });
+  }
 
   // ── STEP 4: Fire-and-forget Trigger.dev tasks ──────────────────────────────
   const profile = await db.profile.findUnique({
@@ -161,12 +176,35 @@ export async function submitVerification(
     select: { fullName: true },
   });
 
-  await notifyAdminNewVerification.trigger({
-    reqId: verReq.reqId,
-    networkId: input.networkId,
-    userId,
-    userFullName: profile?.fullName ?? "A user",
-  });
+  if (autoVerified) {
+    const userRow = await db.user.findUnique({
+      where: { userId },
+      select: { email: true, username: true },
+    });
+    const networkRow = await db.network.findUnique({
+      where: { networkId: input.networkId },
+      select: { name: true },
+    });
+
+    if (userRow && networkRow) {
+      await notifyUserVerificationOutcome.trigger({
+        userId,
+        networkId: input.networkId,
+        reqId: verReq.reqId,
+        approved: true,
+        userEmail: userRow.email,
+        userFullName: profile?.fullName ?? userRow.username,
+        networkName: networkRow.name,
+      });
+    }
+  } else {
+    await notifyAdminNewVerification.trigger({
+      reqId: verReq.reqId,
+      networkId: input.networkId,
+      userId,
+      userFullName: profile?.fullName ?? "A user",
+    });
+  }
 
   logger.info({ reqId: verReq.reqId, userId }, "[Verification] request submitted");
   return { reqId: verReq.reqId };

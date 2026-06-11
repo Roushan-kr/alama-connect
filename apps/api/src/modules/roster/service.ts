@@ -3,7 +3,7 @@ import { db } from '../../config/db.js'
 import { logger } from '../../config/logger.js'
 import { scanBuffer } from '../../services/storage/virusScan.js'
 import { uploadFile, buildKey } from '../../services/storage/index.js'
-import { parseAndSanitizeRoster, mergeRosterRecords, sendEmailCampaign } from '../../tasks/roster.tasks.js'
+import { parseAndSanitizeRoster, analyzeRosterConflicts, mergeRosterRecords, sendEmailCampaign } from '../../tasks/roster.tasks.js'
 import type { SaveMappingsInput, ListRecordsQuery, CreateCampaignInput } from './schemas.js'
 
 // ── Upload ────────────────────────────────────────────────────────────────────
@@ -60,9 +60,10 @@ export async function saveMappings(
   if (session.uploadedBy !== adminUserId) {
     throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN', status: 403 })
   }
-  if (session.status !== 'SANITIZED') {
+  const remappableStatuses = ['SANITIZED', 'ANALYZING', 'CONFLICT_REVIEW', 'READY_TO_MERGE']
+  if (!remappableStatuses.includes(session.status)) {
     throw Object.assign(
-      new Error('Mappings can only be saved when session status is SANITIZED'),
+      new Error(`Mappings can only be saved when session status is one of: ${remappableStatuses.join(', ')}`),
       { code: 'INVALID_SESSION_STATE', status: 409 },
     )
   }
@@ -89,7 +90,7 @@ export async function saveMappings(
     )
   }
 
-  // Replace existing mappings
+  // Replace existing mappings and mark session as MAPPED (analysis task will set ANALYZING)
   await db.$transaction([
     db.rosterColumnMapping.deleteMany({ where: { sessionId } }),
     db.rosterColumnMapping.createMany({
@@ -106,6 +107,13 @@ export async function saveMappings(
       data: { status: 'MAPPED' },
     }),
   ])
+
+  // Trigger async analysis task — validate payload before firing
+  const triggerPayload = { sessionId, networkId: session.networkId }
+  if (!triggerPayload.sessionId || !triggerPayload.networkId) {
+    throw new Error(`[saveMappings] Cannot trigger analysis: missing sessionId or networkId (sessionId=${triggerPayload.sessionId}, networkId=${triggerPayload.networkId})`)
+  }
+  await analyzeRosterConflicts.trigger(triggerPayload)
 }
 
 // ── Confirm Merge ─────────────────────────────────────────────────────────────
@@ -120,10 +128,10 @@ export async function confirmMerge(
     if (session.uploadedBy !== adminUserId) {
       throw Object.assign(new Error('Forbidden'), { code: 'FORBIDDEN', status: 403 })
     }
-    if (session.status !== 'MAPPED') {
+    if (session.status !== 'READY_TO_MERGE') {
       throw Object.assign(
-        new Error('Session must be in MAPPED state to confirm merge'),
-        { code: 'SESSION_NOT_MAPPABLE', status: 409 },
+        new Error('Session must be in READY_TO_MERGE state to confirm merge'),
+        { code: 'SESSION_NOT_READY', status: 409 },
       )
     }
     await tx.rosterUploadSession.update({
@@ -133,7 +141,7 @@ export async function confirmMerge(
   })
 
   // Fire task only after transaction commits
-  await mergeRosterRecords.trigger({ sessionId })
+  await mergeRosterRecords.trigger({ sessionId, adminUserId })
 }
 
 // ── Service utilities ─────────────────────────────────────────────────────────

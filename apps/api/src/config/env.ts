@@ -8,6 +8,7 @@
  * Import this module FIRST in src/index.ts before any other config.
  */
 
+import "dotenv/config";
 import { z } from "zod";
 
 const EnvSchema = z.object({

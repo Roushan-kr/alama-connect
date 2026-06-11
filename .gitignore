@@ -33,3 +33,4 @@ pino-*.log
 
 # Test coverage
 coverage/
+apps/api/GEMINI.md

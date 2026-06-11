@@ -54,6 +54,14 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  // Ensure sample roster is uploaded to R2 (non-blocking)
+  try {
+    const { ensureSampleRosterUploaded } = await import("./config/sampleRoster.js")
+    await ensureSampleRosterUploaded()
+  } catch (err) {
+    logger.error({ err }, "[Startup] Failed to ensure sample roster is uploaded")
+  }
+
   // Start the HTTP server.
   await app.listen({ port: env.PORT, host: "0.0.0.0" })
   logger.info({ port: env.PORT }, `🚀  API server running on port ${env.PORT}`)

@@ -1,11 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/api-client";
+import { useRouter } from "next/navigation";
+import { apiRequest, API_BASE } from "@/lib/api-client";
 import { useAuthStore } from "@/store/auth";
+import Link from "next/link";
 
 export default function RosterPage() {
+  const router = useRouter();
   const { accessToken } = useAuthStore();
   const queryClient = useQueryClient();
   const [networkId, setNetworkId] = useState<string | null>(null);
@@ -31,6 +34,10 @@ export default function RosterPage() {
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       setFile(e.dataTransfer.files[0]);
     }
+  };
+
+  const handleDownloadSample = () => {
+    window.open("https://pub-0631336b69ec44dc9b5dbe8c61843614.r2.dev/sample-roster.xlsx", "_blank");
   };
 
   // Trigger merge confirmation mutation
@@ -61,9 +68,11 @@ export default function RosterPage() {
   ) || [];
 
   // Set default networkId
-  if (adminNetworks.length > 0 && !networkId) {
-    setNetworkId(adminNetworks[0].networkId);
-  }
+  useEffect(() => {
+    if (adminNetworks.length > 0 && !networkId) {
+      setNetworkId(adminNetworks[0].networkId);
+    }
+  }, [adminNetworks, networkId]);
 
   // Fetch session history
   const { data: sessionsData } = useQuery<any>({
@@ -82,7 +91,7 @@ export default function RosterPage() {
       formData.append("networkId", networkId);
       formData.append("file", file);
 
-      const res = await fetch("/api/admin/roster/upload", {
+      const res = await fetch(`${API_BASE}/api/admin/roster/upload?networkId=${networkId}`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -97,9 +106,10 @@ export default function RosterPage() {
       return res.json();
     },
     onSuccess: (data) => {
-      setUploadStatus("Excel uploaded successfully! Sanitizing...");
+      setUploadStatus("Excel uploaded! Redirecting to column mapping...");
       setSessionId(data.data.sessionId);
       queryClient.invalidateQueries({ queryKey: ["roster-sessions", networkId] });
+      router.push(`/admin/roster/sessions/${data.data.sessionId}/mapping`);
     },
     onError: (err: any) => {
       setUploadStatus(`Error: ${err.message}`);
@@ -121,7 +131,7 @@ export default function RosterPage() {
           Upload campus roster (.xlsx, .xls, .csv) up to 10MB (max 50,000 rows).
         </p>
 
-        {adminNetworks.length > 1 && (
+        {adminNetworks.length > 0 && (
           <div className="mt-4">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
               Select Network
@@ -140,7 +150,18 @@ export default function RosterPage() {
           </div>
         )}
 
-        <form onSubmit={handleUpload} className="mt-6 space-y-4 max-w-md">
+        <div className="mt-6">
+          <button
+            type="button"
+            onClick={handleDownloadSample}
+            className="rounded-xl border border-brand-200 bg-brand-50/20 hover:bg-brand-50 px-4 py-2 text-xs font-bold text-brand-600 flex items-center gap-1.5 transition-all"
+          >
+            <span>📥</span>
+            Download sample file
+          </button>
+        </div>
+
+        <form onSubmit={handleUpload} className="mt-4 space-y-4 max-w-md">
           <div
             onDragEnter={handleDrag}
             onDragOver={handleDrag}
@@ -174,12 +195,12 @@ export default function RosterPage() {
           )}
 
           {sessionId && (
-            <a
+            <Link
               href={`/admin/roster/sessions/${sessionId}/mapping`}
               className="inline-block text-xs font-bold text-brand-600 hover:text-brand-700 underline"
             >
               View Sanitization Status & Mappings &rarr;
-            </a>
+            </Link>
           )}
 
           <button
@@ -207,7 +228,7 @@ export default function RosterPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 text-xs text-slate-700">
-              {sessionsData?.data?.map((session: any) => {
+              {(Array.isArray(sessionsData) ? sessionsData : sessionsData?.data)?.map((session: any) => {
                 let badgeClass = "bg-slate-50 text-slate-700 border-slate-100";
                 if (session.status === "COMPLETE") {
                   badgeClass = "bg-green-50 text-green-700 border-green-100";
@@ -243,12 +264,21 @@ export default function RosterPage() {
                     <td className="py-3 font-semibold text-slate-600">{recordsCount}</td>
                     <td className="py-3">{new Date(session.createdAt).toLocaleDateString()}</td>
                     <td className="py-3 text-right space-x-3">
-                      <a
-                        href={`/admin/roster/sessions/${session.sessionId}/mapping`}
-                        className="text-brand-600 hover:text-brand-700 font-bold hover:underline"
-                      >
-                        View mapping
-                      </a>
+                      {["CONFLICT_REVIEW", "READY_TO_MERGE"].includes(session.status) ? (
+                        <Link
+                          href={`/admin/roster/sessions/${session.sessionId}/review`}
+                          className="text-indigo-600 hover:text-indigo-700 font-bold hover:underline"
+                        >
+                          Review conflicts
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/admin/roster/sessions/${session.sessionId}/mapping`}
+                          className="text-brand-600 hover:text-brand-700 font-bold hover:underline"
+                        >
+                          View mapping
+                        </Link>
+                      )}
                       {session.status === "MAPPED" && (
                         <button
                           onClick={() => triggerMergeMutation.mutate(session.sessionId)}
@@ -262,7 +292,7 @@ export default function RosterPage() {
                   </tr>
                 );
               })}
-              {(!sessionsData?.data || sessionsData?.data?.length === 0) && (
+              {(!sessionsData || (Array.isArray(sessionsData) ? sessionsData : sessionsData?.data)?.length === 0) && (
                 <tr>
                   <td colSpan={6} className="py-6 text-center text-slate-400">
                     No sessions found. Upload your first roster above.

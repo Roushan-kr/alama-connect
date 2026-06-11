@@ -58,6 +58,7 @@ export default function RegisterPage() {
     handleSubmit,
     watch,
     trigger,
+    setValue,
     formState: { errors },
   } = useForm<RegisterFormData>({
     resolver: zodResolver(RegisterFormSchema as any),
@@ -66,6 +67,49 @@ export default function RegisterPage() {
       verificationMethod: "ENTRY_NUMBER",
     },
   })
+
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [lookupResult, setLookupResult] = useState<any>(null)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const [isFromRoster, setIsFromRoster] = useState(false)
+
+  const entryNumberValue = watch("entryNumber")
+  const networkIdValue = watch("networkId")
+
+  const handleLookup = async () => {
+    if (!entryNumberValue) {
+      setLookupError("Please enter an entry/roll number first")
+      return
+    }
+    if (!networkIdValue) {
+      setLookupError("Please select a university network in Step 2")
+      return
+    }
+    setLookupLoading(true)
+    setLookupError(null)
+    setLookupResult(null)
+    try {
+      const record = await apiRequest<any>(
+        `/api/roster/lookup?entryNumber=${encodeURIComponent(entryNumberValue)}&networkId=${networkIdValue}`
+      )
+      setLookupResult(record)
+    } catch (err: any) {
+      setLookupError(err.message || "Entry number not found in roster")
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
+  const handleUseRosterData = () => {
+    if (!lookupResult) return
+    if (lookupResult.fullName) {
+      setValue("fullName", lookupResult.fullName)
+    }
+    if (lookupResult.role) {
+      setValue("role", lookupResult.role)
+    }
+    setIsFromRoster(true)
+  }
 
   const selectedMethod = watch("verificationMethod")
 
@@ -242,6 +286,11 @@ export default function RegisterPage() {
           <div className="space-y-4">
             <label className="block text-sm font-medium text-slate-700">
               Full Name
+              {isFromRoster && (
+                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-100 animate-pulse">
+                  from roster
+                </span>
+              )}
               <input
                 type="text"
                 {...formRegister("fullName")}
@@ -284,6 +333,11 @@ export default function RegisterPage() {
 
             <label className="block text-sm font-medium text-slate-700">
               Role
+              {isFromRoster && (
+                <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-100 animate-pulse">
+                  from roster
+                </span>
+              )}
               <select
                 {...formRegister("role")}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
@@ -342,15 +396,81 @@ export default function RegisterPage() {
             </div>
 
             {selectedMethod === "ENTRY_NUMBER" ? (
-              <label className="block text-sm font-medium text-slate-700">
-                Official Entry / Roll Number
-                <input
-                  type="text"
-                  {...formRegister("entryNumber")}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  placeholder="e.g. 102103001"
-                />
-              </label>
+              <div className="space-y-4">
+                <div className="flex gap-2 items-end">
+                  <label className="block text-sm font-medium text-slate-700 flex-1">
+                    Official Entry / Roll Number
+                    {isFromRoster && (
+                      <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-100 animate-pulse">
+                        from roster
+                      </span>
+                    )}
+                    <input
+                      type="text"
+                      {...formRegister("entryNumber")}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      placeholder="e.g. 102103001"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleLookup}
+                    disabled={lookupLoading}
+                    className="h-10 rounded-lg bg-slate-900 hover:bg-slate-800 px-4 text-xs font-bold text-white transition-all disabled:opacity-50"
+                  >
+                    {lookupLoading ? "Looking up..." : "Look up"}
+                  </button>
+                </div>
+
+                {lookupError && (
+                  <p className="text-xs text-red-600 font-semibold bg-red-50 p-2 rounded-lg border border-red-100">
+                    {lookupError}
+                  </p>
+                )}
+
+                {lookupResult && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-4 space-y-3 animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-emerald-600 text-sm font-bold">✓</span>
+                        <h4 className="text-xs font-bold text-slate-900">Roster Entry Matches!</h4>
+                      </div>
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                        roster record
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-semibold uppercase">Full Name</span>
+                        <span className="font-semibold text-slate-800">{lookupResult.fullName || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-semibold uppercase">Role</span>
+                        <span className="font-semibold text-slate-800">{lookupResult.role || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-semibold uppercase">Branch</span>
+                        <span className="font-semibold text-slate-800">{lookupResult.branch || "—"}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] font-semibold uppercase">Batch & Estimated Years</span>
+                        <span className="font-semibold text-slate-800">
+                          {lookupResult.batch ? `${lookupResult.batch} (Est: ${lookupResult.batch - 4} - ${lookupResult.batch})` : "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleUseRosterData}
+                      className="w-full rounded-lg bg-emerald-600 hover:bg-emerald-700 py-2 text-xs font-bold text-white shadow-sm transition-all"
+                    >
+                      Yes, pre-fill form with this data
+                    </button>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="block text-sm font-medium text-slate-700">
                 ID / Degree / Transcript (PDF/Image, max 5MB)

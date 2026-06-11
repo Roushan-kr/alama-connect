@@ -12,6 +12,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "prisma.config.ts", "scripts/**/*"],
+  "include": [
+    "src/**/*",
+    "prisma.config.ts",
+    "scripts/**/*",
+    "trigger.config.ts"
+  ],
   "exclude": ["node_modules", "dist"]
 }

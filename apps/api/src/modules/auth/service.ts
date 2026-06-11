@@ -18,10 +18,12 @@ import { db } from "@/config/db.js";
 import { env } from "@/config/env.js";
 import { logger } from "@/config/logger.js";
 import { nowTimestamp } from "@alumni/shared";
+import { normalizeEntryNumber } from "../../lib/entry-number.js";
 import { sendConfirmationEmail } from "@/tasks/email.tasks.js";
 import { notifyAdminNewVerification } from "@/tasks/notification.tasks.js";
 import type { RegisterInput, LoginInput } from "./schemas.js";
 import type { AuthTokens, PublicUser } from "./types.js";
+
 
 // ── Secrets ───────────────────────────────────────────────────────────────────
 
@@ -122,6 +124,28 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
 
   const passwordHash = await argon2.hash(input.password, ARGON2_OPTIONS);
 
+  let rosterRecord: any = null;
+  let autoVerified = false;
+
+  if (input.networkId && input.verificationMethod === "ENTRY_NUMBER" && input.entryNumber) {
+    const normalized = normalizeEntryNumber(input.entryNumber);
+    rosterRecord = await db.rosterRecord.findFirst({
+      where: {
+        networkId: input.networkId,
+        entryNumber: normalized,
+        removedFromRoster: false,
+      },
+    });
+
+    if (!rosterRecord) {
+      throw Object.assign(
+        new Error("Entry number not found in institutional records"),
+        { code: "ENTRY_NUMBER_NOT_FOUND", status: 400 },
+      );
+    }
+    autoVerified = true;
+  }
+
   const user = await db.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
@@ -150,19 +174,34 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
           userId: created.userId,
           networkId: input.networkId,
           role: input.role,
-          status: "PENDING",
+          status: autoVerified ? "VERIFIED" : "PENDING",
         },
       });
 
       if (input.verificationMethod) {
+        const normalizedEntryNumber = input.entryNumber ? normalizeEntryNumber(input.entryNumber) : null;
         await tx.verificationRequest.create({
           data: {
             userId: created.userId,
             networkId: input.networkId,
             method: input.verificationMethod,
-            entryNumber: input.entryNumber ?? null,
+            entryNumber: normalizedEntryNumber,
             documentUrl: input.documentUrl ?? null,
-            status: "PENDING",
+            status: autoVerified ? "VERIFIED" : "PENDING",
+            reviewedAt: autoVerified ? new Date() : null,
+            adminNotes: autoVerified ? `[auto] Matched roster_record: ${rosterRecord.recordId}` : null,
+          },
+        });
+      }
+
+      if (autoVerified && rosterRecord) {
+        await tx.education.create({
+          data: {
+            userId: created.userId,
+            networkId: input.networkId,
+            degree: rosterRecord.branch,
+            endYear: rosterRecord.batch,
+            isVerified: true,
           },
         });
       }
@@ -180,7 +219,7 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
     username: user.username,
   });
 
-  if (input.networkId && input.role && input.verificationMethod) {
+  if (input.networkId && input.role && input.verificationMethod && !autoVerified) {
     const verReq = await db.verificationRequest.findFirst({
       where: { userId: user.userId, networkId: input.networkId },
     });

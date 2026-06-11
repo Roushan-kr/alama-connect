@@ -73,7 +73,7 @@ The platform is **institution-controlled**: faculty/administrators moderate, cre
 | **Content Engine**     | Unified content table (posts, PDFs, announcements, jobs)   |
 | **Geo Intelligence**   | _(Future)_ Alumni density map with clustering              |
 
-> **No super-admin UI.** Network provisioning is done via a developer CLI/seed script (see Section 20). Regular admins (faculty/TPO) manage their own network via the Admin Panel.
+> **Super-admin console.** While network creation and initial admin setup remain CLI-only operations (see Section 20) to ensure secure provisioning, a global Super Admin Console (`/admin/super`) is available for monitoring global platform metrics, managing network administrator lists, and disabling user accounts globally. Regular admins (faculty/TPO) manage their own network via the standard Admin Panel.
 
 ---
 
@@ -1173,7 +1173,7 @@ async function getFeedPage(networkId: string, page: number) {
 
 ## 20. Network Provisioning & CLI Bootstrap
 
-> No super-admin UI. Network creation and initial admin setup is done via CLI scripts run by developers. This is intentional: it keeps the attack surface small and provisioning rare.
+> **CLI Provisioning.** Network creation and initial admin setup remain CLI-only operations to keep the attack surface small and provisioning rare. Other global management operations (metrics monitoring, managing network administrator lists, and account disabling) are performed via the global Super Admin Console (`/admin/super`).
 
 ### CLI Scripts
 
