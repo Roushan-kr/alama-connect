@@ -56,7 +56,8 @@ export const postsRouter: FastifyPluginAsync = async (fastify) => {
           fields[part.fieldname] = part.value as string
         }
       }
-    } catch {
+    } catch (err) {
+      logger.error({ err }, "[Posts] multipart parsing exception");
       return reply.status(400).send({
         error: "Invalid multipart request",
         code: "VALIDATION_ERROR",

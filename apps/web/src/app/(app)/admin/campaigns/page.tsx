@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/api-client";
 import { useAuthStore } from "@/store/auth";
@@ -14,9 +14,14 @@ export default function CampaignsPage() {
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [bodyTemplate, setBodyTemplate] = useState("");
+  
+  // Target Mode state: roster filters vs group targeting
+  const [targetMode, setTargetMode] = useState<"ROSTER" | "GROUP">("ROSTER");
   const [branch, setBranch] = useState("");
   const [batch, setBatch] = useState("");
   const [role, setRole] = useState("");
+  const [groupId, setGroupId] = useState("");
+  
   const [sendImmediately, setSendImmediately] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ success?: boolean; error?: string } | null>(null);
 
@@ -45,6 +50,13 @@ export default function CampaignsPage() {
     enabled: !!accessToken && !!networkId,
   });
 
+  // Fetch groups of selected network
+  const { data: groupsData } = useQuery<any>({
+    queryKey: ["admin-network-groups-campaigns", networkId],
+    queryFn: () => apiRequest(`/api/groups?networkId=${networkId}`, { token: accessToken }),
+    enabled: !!accessToken && !!networkId,
+  });
+
   // Create Campaign Mutation
   const createMutation = useMutation({
     mutationFn: (body: any) =>
@@ -60,6 +72,7 @@ export default function CampaignsPage() {
       setBranch("");
       setBatch("");
       setRole("");
+      setGroupId("");
       setSendImmediately(false);
       setStatusMessage({ success: true });
       queryClient.invalidateQueries({ queryKey: ["campaigns", networkId] });
@@ -76,13 +89,22 @@ export default function CampaignsPage() {
 
     // Build filter map
     const filter: Record<string, any> = {};
-    if (branch.trim()) filter.branch = branch.trim();
-    if (batch.trim()) filter.batch = parseInt(batch.trim(), 10);
-    if (role.trim()) filter.role = role.trim();
 
-    if (Object.keys(filter).length === 0) {
-      setStatusMessage({ error: "At least one filter field is required to prevent accidental network-wide sends" });
-      return;
+    if (targetMode === "GROUP") {
+      if (!groupId) {
+        setStatusMessage({ error: "Please select a target group." });
+        return;
+      }
+      filter.groupId = groupId;
+    } else {
+      if (branch.trim()) filter.branch = branch.trim();
+      if (batch.trim()) filter.batch = parseInt(batch.trim(), 10);
+      if (role.trim()) filter.role = role.trim();
+
+      if (Object.keys(filter).length === 0) {
+        setStatusMessage({ error: "At least one filter field is required to prevent accidental network-wide sends" });
+        return;
+      }
     }
 
     createMutation.mutate({
@@ -101,7 +123,7 @@ export default function CampaignsPage() {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900">Email Campaign Manager</h1>
           <p className="text-xs text-slate-500 mt-1">
-            Create templates, segment recipients via roster filters, and broadcast emails.
+            Create templates, segment recipients via roster filters or select group members, and broadcast emails.
           </p>
         </div>
 
@@ -166,46 +188,92 @@ export default function CampaignsPage() {
               </div>
             </div>
 
-            {/* Filter segments */}
-            <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-3">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                Filter Target Roster Segment (At least 1 required)
-              </span>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-slate-600">Branch</label>
-                  <input
-                    type="text"
-                    placeholder="CSE"
-                    value={branch}
-                    onChange={(e) => setBranch(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-slate-600">Batch Year</label>
-                  <input
-                    type="number"
-                    placeholder="2026"
-                    value={batch}
-                    onChange={(e) => setBatch(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-slate-600">Role</label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value)}
-                    className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
-                  >
-                    <option value="">All Roles</option>
-                    <option value="STUDENT">STUDENT</option>
-                    <option value="ALUMNI">ALUMNI</option>
-                    <option value="FACULTY">FACULTY</option>
-                  </select>
+            {/* Filter target configuration */}
+            <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                  Campaign Targeting Mode
+                </span>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-semibold">
+                    <input
+                      type="radio"
+                      name="targetMode"
+                      value="ROSTER"
+                      checked={targetMode === "ROSTER"}
+                      onChange={() => setTargetMode("ROSTER")}
+                      className="text-brand-600 border-slate-300"
+                    />
+                    Roster Filters
+                  </label>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer font-semibold">
+                    <input
+                      type="radio"
+                      name="targetMode"
+                      value="GROUP"
+                      checked={targetMode === "GROUP"}
+                      onChange={() => setTargetMode("GROUP")}
+                      className="text-brand-600 border-slate-300"
+                    />
+                    Group Members
+                  </label>
                 </div>
               </div>
+
+              {targetMode === "ROSTER" ? (
+                <div className="grid grid-cols-3 gap-3 animate-fade-in">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-600">Branch</label>
+                    <input
+                      type="text"
+                      placeholder="CSE"
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-600">Batch Year</label>
+                    <input
+                      type="number"
+                      placeholder="2026"
+                      value={batch}
+                      onChange={(e) => setBatch(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold text-slate-600">Role</label>
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value)}
+                      className="w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
+                    >
+                      <option value="">All Roles</option>
+                      <option value="STUDENT">STUDENT</option>
+                      <option value="ALUMNI">ALUMNI</option>
+                      <option value="FACULTY">FACULTY</option>
+                    </select>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1 animate-fade-in">
+                  <label className="text-[9px] font-bold text-slate-600">Target Group</label>
+                  <select
+                    value={groupId}
+                    onChange={(e) => setGroupId(e.target.value)}
+                    required
+                    className="w-full rounded-lg border border-slate-200 px-3 py-1.5 text-xs outline-none bg-white focus:border-brand-500"
+                  >
+                    <option value="">Select a group...</option>
+                    {groupsData?.data?.map((g: any) => (
+                      <option key={g.groupId} value={g.groupId}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Template Body */}

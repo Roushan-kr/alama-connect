@@ -182,13 +182,22 @@ Keep these guidelines in mind to avoid repeating past development mistakes:
 ## ⚡ Current Session State & Focus Log
 
 ### 🎯 Current Focus
-1. **Roster Integration & Auto-Verification:**
-   - Completed the auto-verification logic for users who register or verify using their institutional roster records. Resolved conflict mapping resolution bugs and search network restrictions for Super Admin.
+1. **Roster Integration, Auto-Verification & Group Targeting:**
+   - Completed auto-verification logic for roster matches.
+   - Implemented Group Targeting for Announcements, Newsletters, and Campaigns, alongside a single-operation Super Admin Bulk Broadcast system.
 
 ### ⚠️ Current Blockers & Risks
 * None.
 
 ### 📝 Change Log & Session Notes
+* **2026-06-11 (Group Targeting & Super Admin Broadcasts Complete):**
+  - Added `POST /api/admin/super/broadcast` endpoint, allowing Super Admins to send bulk announcements or newsletters to multiple networks/groups in a single, resilient backend operation via Trigger.dev task.
+  - Implemented automatic user deduplication across targeted networks and groups using a unique `Set`.
+  - Added group targeting dropdowns for standard admins in the "Push In-App Announcement" and "Email Newsletter Broadcast" forms.
+  - Configured group-level content visibility: single content rows are created per target (network or group) with `visibility: GROUP` and `groupId` set.
+  - Enforced verified network membership bounds for targeted group members by explicitly joining `groupMember` and `networkMember` tables on `status = 'VERIFIED'`.
+  - Updated Email Campaign Manager to treat `groupId` as a special targeting filter, mutually exclusive with other roster record filters.
+  - Optimized group campaign queries by loading profile, education, and verification requests in a single include query to prevent N+1 overhead.
 * **2026-06-11 (Roster Integration & Auto-Verification Complete):**
   - Implemented auto-verification logic in `register` (`apps/api/src/modules/auth/service.ts`) and `submitVerification` (`apps/api/src/modules/verification/service.ts`). Users selecting `ENTRY_NUMBER` who match an active, non-removed roster record are immediately marked as `VERIFIED` (`NetworkMember.status = 'VERIFIED'` and `VerificationRequest.status = 'VERIFIED'`).
   - Automatically created a verified `Education` entry (`isVerified = true`) for auto-verified users, mapping the roster record's `branch` to `degree` and `batch` to `endYear`.

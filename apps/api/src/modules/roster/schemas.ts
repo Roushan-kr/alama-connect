@@ -35,12 +35,23 @@ export const CreateCampaignSchema = z.object({
   subject: z.string().min(1).max(500),
   bodyTemplate: z.string().min(1),
   filter: z
-    .record(
-      z.enum(FILTERABLE_ROSTER_FIELDS),
-      z.union([z.string(), z.number(), z.boolean()])
-    )
+    .object({
+      branch: z.string().optional(),
+      batch: z.coerce.number().int().optional(),
+      role: z.string().optional(),
+      removedFromRoster: z.boolean().optional(),
+      groupId: z.string().uuid().optional(),
+    })
     .refine((f) => Object.keys(f).length > 0, {
       message: 'At least one filter field is required to prevent accidental network-wide sends',
+    })
+    .refine((f) => {
+      if (f.groupId && (f.branch || f.batch || f.role || f.removedFromRoster !== undefined)) {
+        return false;
+      }
+      return true;
+    }, {
+      message: 'groupId filter cannot be combined with other roster filters (branch, batch, role, removedFromRoster)',
     }),
   scheduledAt: z.coerce.date().optional(),
   sendImmediately: z.boolean().optional().default(false),

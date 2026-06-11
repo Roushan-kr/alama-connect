@@ -12,6 +12,7 @@ import {
   UpdateNetworkAdminRoleSchema,
   GlobalUserSearchSchema,
   DisableUserSchema,
+  SuperAdminBroadcastSchema,
 } from "./schemas.js";
 import { logger } from "../../config/logger.js";
 
@@ -127,6 +128,35 @@ export const superAdminRouter: FastifyPluginAsync = async (fastify) => {
       return reply.status(200).send({ data });
     } catch (err: unknown) {
       return handleError(err, reply, "[Super Admin] getPlatformMetrics error");
+    }
+  });
+
+  // POST /broadcast
+  fastify.post("/broadcast", async (request, reply) => {
+    if (!request.user) return;
+
+    const parsed = SuperAdminBroadcastSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: parsed.error.issues.map((i) => i.message).join(", "),
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    try {
+      const { superAdminBroadcast } = await import("../../tasks/announcement.tasks.js");
+      await superAdminBroadcast.trigger({
+        networkIds: parsed.data.networkIds,
+        groupIds: parsed.data.groupIds,
+        type: parsed.data.type,
+        title: parsed.data.title,
+        body: parsed.data.body,
+        senderUserId: request.user.userId,
+      });
+
+      return reply.status(202).send({ data: { status: "ACCEPTED", message: "Broadcast initiated" } });
+    } catch (err: unknown) {
+      return handleError(err, reply, "[Super Admin] broadcast error");
     }
   });
 };

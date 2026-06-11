@@ -732,8 +732,6 @@ export const mergeRosterRecords = task({
   },
 })
 
-// ── Task 4: sendEmailCampaign ─────────────────────────────────────────────────
-
 export const sendEmailCampaign = task({
   id: "send-email-campaign",
   retry: { maxAttempts: 1 }, // Never retry bulk sends — use individual failure logs
@@ -741,83 +739,172 @@ export const sendEmailCampaign = task({
     const { campaignId } = payload
     const campaign = await db.emailCampaign.findUniqueOrThrow({ where: { campaignId } })
 
-    // Get most recent COMPLETE session's mappings for this network (for templateVar resolution)
-    const latestSession = await db.rosterUploadSession.findFirst({
-      where: { networkId: campaign.networkId, status: "COMPLETE" },
-      orderBy: { createdAt: "desc" },
-      include: { columnMappings: true },
-    })
-
-    const filter = campaign.filter as Record<string, unknown>
-    // Build type-safe Prisma where from allowlisted filter keys
-    const where: Record<string, unknown> = { networkId: campaign.networkId }
-    for (const [key, val] of Object.entries(filter)) {
-      if (["branch", "batch", "role", "removedFromRoster"].includes(key)) {
-        where[key] = val
-      }
+    const filter = campaign.filter as {
+      branch?: string;
+      batch?: number;
+      role?: string;
+      removedFromRoster?: boolean;
+      groupId?: string;
     }
 
     let total = 0,
       sent = 0,
       failed = 0
     const failedEmails: string[] = []
-    let cursor: string | undefined
-    let batchNum = 0
 
-    // Paginate in batches of 100
-    while (true) {
-      const records = await db.rosterRecord.findMany({
-        where: {
-          ...where,
-          ...(cursor ? { recordId: { gt: cursor } } : {}),
-        },
-        orderBy: { recordId: "asc" },
-        take: 100,
-      })
+    if (filter.groupId) {
+      // Group-targeted campaign logic: page over groupMember
+      let cursor: string | undefined = undefined;
+      let batchNum = 0;
 
-      if (records.length === 0) break
-      cursor = records.at(-1)!.recordId
-      batchNum++
+      while (true) {
+        const members = (await db.groupMember.findMany({
+          where: {
+            groupId: filter.groupId,
+            user: {
+              networkMemberships: {
+                some: {
+                  networkId: campaign.networkId,
+                  status: "VERIFIED",
+                },
+              },
+            },
+            ...(cursor ? { userId: { gt: cursor } } : {}),
+          },
+          orderBy: { userId: "asc" },
+          take: 100,
+          select: {
+            userId: true,
+            user: {
+              select: {
+                email: true,
+                username: true,
+                profile: { select: { fullName: true } },
+                verificationRequests: {
+                  where: { networkId: campaign.networkId },
+                  select: { entryNumber: true },
+                  take: 1,
+                },
+                educations: {
+                  where: { networkId: campaign.networkId },
+                  select: { degree: true, endYear: true },
+                  take: 1,
+                },
+              },
+            },
+          },
+        })) as any[];
 
-      for (const record of records) {
-        total++
-        if (!record.email) continue // skip — no email
+        if (members.length === 0) break;
+        cursor = members[members.length - 1]!.userId;
+        batchNum++;
 
-        // Build template variables: meta keys are already templateVar-keyed
-        const vars: Record<string, string> = {
-          studentName: record.fullName ?? "",
-          batch: record.batch ? String(record.batch) : "",
-          branch: record.branch ?? "",
-          role: record.role ?? "",
-          entryNumber: record.entryNumber,
-          ...(record.meta as Record<string, string>),
+        for (const member of members) {
+          total++;
+          const email = member.user.email;
+          if (!email) continue;
+
+          const user = member.user;
+          const edu = user.educations[0];
+          const verReq = user.verificationRequests[0];
+
+          const vars: Record<string, string> = {
+            studentName: user.profile?.fullName ?? user.username,
+            batch: edu?.endYear ? String(edu.endYear) : "",
+            branch: edu?.degree ?? "",
+            role: "STUDENT",
+            entryNumber: verReq?.entryNumber ?? "",
+          };
+
+          const body = campaign.bodyTemplate.replace(
+            /\{\{(\w+)\}\}/g,
+            (_, key: string) => vars[key] ?? "",
+          );
+
+          try {
+            await sendRaw({ to: email, subject: campaign.subject, html: body });
+            sent++;
+          } catch (err: unknown) {
+            failed++;
+            failedEmails.push(email);
+            logger.warn(
+              { campaignId, email, err },
+              "[Task:sendEmailCampaign] send failed",
+            );
+          }
         }
 
-        // Render template — safe regex replacement
-        const body = campaign.bodyTemplate.replace(
-          /\{\{(\w+)\}\}/g,
-          (_, key: string) => vars[key] ?? "",
-        )
+        logger.info({ campaignId, batch: batchNum, sent, total }, "Campaign batch sent");
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
-        try {
-          await sendRaw({ to: record.email, subject: campaign.subject, html: body })
-          sent++
-        } catch (err: unknown) {
-          failed++
-          failedEmails.push(record.email)
-          logger.warn(
-            { campaignId, email: record.email, err },
-            "[Task:sendEmailCampaign] send failed",
-          )
-          // Continue — do NOT throw, never retry bulk sends
-        }
+        if (members.length < 100) break;
       }
+    } else {
+      // Build type-safe Prisma where from allowlisted filter keys
+      const where: Record<string, unknown> = { networkId: campaign.networkId }
+      if (filter.branch) where.branch = filter.branch;
+      if (filter.batch) where.batch = filter.batch;
+      if (filter.role) where.role = filter.role;
+      if (filter.removedFromRoster !== undefined) where.removedFromRoster = filter.removedFromRoster;
 
-      logger.info({ campaignId, batch: batchNum, sent, total }, "Campaign batch sent")
-      // Delay 200ms between batches to rate limit email sending
-      await new Promise((resolve) => setTimeout(resolve, 200))
+      let cursor: string | undefined
+      let batchNum = 0
 
-      if (records.length < 100) break
+      // Paginate in batches of 100
+      while (true) {
+        const records = await db.rosterRecord.findMany({
+          where: {
+            ...where,
+            ...(cursor ? { recordId: { gt: cursor } } : {}),
+          },
+          orderBy: { recordId: "asc" },
+          take: 100,
+        })
+
+        if (records.length === 0) break
+        cursor = records.at(-1)!.recordId
+        batchNum++
+
+        for (const record of records) {
+          total++
+          if (!record.email) continue // skip — no email
+
+          // Build template variables: meta keys are already templateVar-keyed
+          const vars: Record<string, string> = {
+            studentName: record.fullName ?? "",
+            batch: record.batch ? String(record.batch) : "",
+            branch: record.branch ?? "",
+            role: record.role ?? "",
+            entryNumber: record.entryNumber,
+            ...(record.meta as Record<string, string>),
+          }
+
+          // Render template — safe regex replacement
+          const body = campaign.bodyTemplate.replace(
+            /\{\{(\w+)\}\}/g,
+            (_, key: string) => vars[key] ?? "",
+          )
+
+          try {
+            await sendRaw({ to: record.email, subject: campaign.subject, html: body })
+            sent++
+          } catch (err: unknown) {
+            failed++
+            failedEmails.push(record.email)
+            logger.warn(
+              { campaignId, email: record.email, err },
+              "[Task:sendEmailCampaign] send failed",
+            )
+            // Continue — do NOT throw, never retry bulk sends
+          }
+        }
+
+        logger.info({ campaignId, batch: batchNum, sent, total }, "Campaign batch sent")
+        // Delay 200ms between batches to rate limit email sending
+        await new Promise((resolve) => setTimeout(resolve, 200))
+
+        if (records.length < 100) break
+      }
     }
 
     await db.emailCampaign.update({

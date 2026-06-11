@@ -20,18 +20,62 @@ export default function AdminPage() {
   // Announcement form state
   const [announceTitle, setAnnounceTitle] = useState("");
   const [announceBody, setAnnounceBody] = useState("");
+  const [announceTargetType, setAnnounceTargetType] = useState<"NETWORK" | "GROUP">("NETWORK");
+  const [announceGroupId, setAnnounceGroupId] = useState<string | null>(null);
   const [announceStatus, setAnnounceStatus] = useState<{ success?: boolean; error?: string } | null>(null);
 
   // Newsletter form state
   const [newsTitle, setNewsTitle] = useState("");
   const [newsBody, setNewsBody] = useState("");
+  const [newsTargetType, setNewsTargetType] = useState<"NETWORK" | "GROUP">("NETWORK");
+  const [newsGroupId, setNewsGroupId] = useState<string | null>(null);
   const [newsStatus, setNewsStatus] = useState<{ success?: boolean; error?: string } | null>(null);
+
+  // Super Admin Broadcast state
+  const [superBroadcastType, setSuperBroadcastType] = useState<"ANNOUNCEMENT" | "NEWSLETTER">("ANNOUNCEMENT");
+  const [superTitle, setSuperTitle] = useState("");
+  const [superBody, setSuperBody] = useState("");
+  const [superSelectedNetworks, setSuperSelectedNetworks] = useState<string[]>([]);
+  const [superSelectedGroups, setSuperSelectedGroups] = useState<string[]>([]);
+  const [superStatus, setSuperStatus] = useState<{ success?: boolean; error?: string } | null>(null);
 
   // Load user profile to identify networks where they are ADMIN
   const { data: profile } = useQuery<any>({
     queryKey: ["profile-me-admin"],
     queryFn: () => apiRequest("/api/users/me", { token: accessToken }),
     enabled: !!accessToken,
+  });
+
+  const isSuperAdmin = profile?.globalRole === "SUPER_ADMIN";
+
+  // Load all networks (available for Super Admins or dropdown selections)
+  const { data: allNetworksData } = useQuery<any>({
+    queryKey: ["all-networks"],
+    queryFn: () => apiRequest("/api/networks"),
+    enabled: !!accessToken,
+  });
+
+  // Load all groups of selected network
+  const { data: groupsData } = useQuery<any>({
+    queryKey: ["admin-network-groups", selectedNetworkId],
+    queryFn: () => apiRequest(`/api/groups?networkId=${selectedNetworkId}`, { token: accessToken }),
+    enabled: !!accessToken && !!selectedNetworkId,
+  });
+
+  // Load all groups (for Super Admin multi-select across all networks)
+  const { data: allGroupsData } = useQuery<any>({
+    queryKey: ["all-groups-flat"],
+    queryFn: async () => {
+      if (!allNetworksData?.data) return [];
+      const promises = allNetworksData.data.map((net: any) =>
+        apiRequest(`/api/groups?networkId=${net.networkId}`, { token: accessToken })
+          .then((res: any) => res?.data || [])
+          .catch(() => [])
+      );
+      const results = await Promise.all(promises);
+      return results.flat();
+    },
+    enabled: !!accessToken && isSuperAdmin && !!allNetworksData?.data,
   });
 
   useEffect(() => {
@@ -43,8 +87,10 @@ export default function AdminPage() {
       if (admins.length > 0 && !selectedNetworkId) {
         setSelectedNetworkId(admins[0].networkId);
       }
+    } else if (isSuperAdmin && allNetworksData?.data && !selectedNetworkId) {
+      setSelectedNetworkId(allNetworksData.data[0]?.networkId);
     }
-  }, [profile, selectedNetworkId]);
+  }, [profile, selectedNetworkId, allNetworksData, isSuperAdmin]);
 
   // Fetch Analytics stats for selected network
   const {
@@ -63,7 +109,7 @@ export default function AdminPage() {
 
   // Dispatch Announcement mutation
   const announcementMutation = useMutation({
-    mutationFn: (body: { title: string; body: string; networkId: string }) =>
+    mutationFn: (body: { title: string; body: string; networkId: string; groupId?: string }) =>
       apiRequest("/api/admin/announcements", {
         method: "POST",
         body,
@@ -72,6 +118,7 @@ export default function AdminPage() {
     onSuccess: () => {
       setAnnounceTitle("");
       setAnnounceBody("");
+      setAnnounceGroupId(null);
       setAnnounceStatus({ success: true });
       refetchStats();
       setTimeout(() => setAnnounceStatus(null), 5000);
@@ -83,7 +130,7 @@ export default function AdminPage() {
 
   // Dispatch Newsletter mutation
   const newsletterMutation = useMutation({
-    mutationFn: (body: { title: string; body: string; networkId: string }) =>
+    mutationFn: (body: { title: string; body: string; networkId: string; groupId?: string }) =>
       apiRequest("/api/admin/newsletters", {
         method: "POST",
         body,
@@ -92,12 +139,40 @@ export default function AdminPage() {
     onSuccess: () => {
       setNewsTitle("");
       setNewsBody("");
+      setNewsGroupId(null);
       setNewsStatus({ success: true });
       refetchStats();
       setTimeout(() => setNewsStatus(null), 5000);
     },
     onError: (err: any) => {
       setNewsStatus({ error: err.message || "Failed to dispatch newsletter" });
+    },
+  });
+
+  // Dispatch Super Admin Broadcast mutation
+  const superBroadcastMutation = useMutation({
+    mutationFn: (body: {
+      networkIds: string[];
+      groupIds: string[];
+      type: "ANNOUNCEMENT" | "NEWSLETTER";
+      title: string;
+      body: string;
+    }) =>
+      apiRequest("/api/admin/super/broadcast", {
+        method: "POST",
+        body,
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      setSuperTitle("");
+      setSuperBody("");
+      setSuperSelectedNetworks([]);
+      setSuperSelectedGroups([]);
+      setSuperStatus({ success: true });
+      setTimeout(() => setSuperStatus(null), 5000);
+    },
+    onError: (err: any) => {
+      setSuperStatus({ error: err.message || "Failed to initiate super broadcast" });
     },
   });
 
@@ -109,6 +184,7 @@ export default function AdminPage() {
       title: announceTitle,
       body: announceBody,
       networkId: selectedNetworkId,
+      ...(announceTargetType === "GROUP" && announceGroupId ? { groupId: announceGroupId } : {}),
     });
   };
 
@@ -120,10 +196,28 @@ export default function AdminPage() {
       title: newsTitle,
       body: newsBody,
       networkId: selectedNetworkId,
+      ...(newsTargetType === "GROUP" && newsGroupId ? { groupId: newsGroupId } : {}),
     });
   };
 
-  if (adminNetworks.length === 0) {
+  const handleSuperBroadcast = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!superTitle.trim() || !superBody.trim()) return;
+    if (superSelectedNetworks.length === 0 && superSelectedGroups.length === 0) {
+      setSuperStatus({ error: "Please select at least one network or group target." });
+      return;
+    }
+    setSuperStatus(null);
+    superBroadcastMutation.mutate({
+      networkIds: superSelectedNetworks,
+      groupIds: superSelectedGroups,
+      type: superBroadcastType,
+      title: superTitle,
+      body: superBody,
+    });
+  };
+
+  if (adminNetworks.length === 0 && !isSuperAdmin) {
     return (
       <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-center text-red-800">
         <h2 className="text-base font-bold">Access Denied</h2>
@@ -132,10 +226,9 @@ export default function AdminPage() {
     );
   }
 
+  const activeNetworks = isSuperAdmin ? (allNetworksData?.data || []) : adminNetworks.map(n => n.network);
   const selectedNetworkName =
-    adminNetworks.find((n) => n.networkId === selectedNetworkId)?.network?.name || "chosen network";
-
-  const stats = analyticsData;
+    activeNetworks.find((n: any) => n.networkId === selectedNetworkId)?.name || "chosen network";
 
   return (
     <div className="space-y-8">
@@ -149,16 +242,16 @@ export default function AdminPage() {
         </div>
 
         {/* Network Selector if admin of multiple */}
-        {adminNetworks.length > 1 && (
+        {activeNetworks.length > 1 && (
           <div>
             <select
               value={selectedNetworkId || ""}
               onChange={(e) => setSelectedNetworkId(e.target.value)}
               className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 bg-white outline-none focus:border-brand-500"
             >
-              {adminNetworks.map((net) => (
+              {activeNetworks.map((net: any) => (
                 <option key={net.networkId} value={net.networkId}>
-                  {net.network?.name || net.networkId}
+                  {net.name || net.networkId}
                 </option>
               ))}
             </select>
@@ -173,7 +266,7 @@ export default function AdminPage() {
           <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-xs text-red-700">
             Failed to load dashboard metrics. Re-authenticating might help.
           </div>
-        ) : loadingStats || !stats ? (
+        ) : loadingStats || !analyticsData ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[1, 2, 3, 4].map((n) => (
               <div key={n} className="h-24 w-full animate-pulse rounded-2xl bg-white border border-slate-200" />
@@ -184,28 +277,28 @@ export default function AdminPage() {
             {/* Metric 1 */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Members</span>
-              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{stats.membersCount}</span>
+              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{analyticsData.membersCount}</span>
               <span className="text-[10px] text-slate-400 mt-1 block">Verified accounts</span>
             </div>
 
             {/* Metric 2 */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Jobs</span>
-              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{stats.activeJobsCount}</span>
+              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{analyticsData.activeJobsCount}</span>
               <span className="text-[10px] text-slate-400 mt-1 block">Not yet expired</span>
             </div>
 
             {/* Metric 3 */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Connections</span>
-              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{stats.connectionsCount}</span>
+              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{analyticsData.connectionsCount}</span>
               <span className="text-[10px] text-slate-400 mt-1 block">Network-scoped pairs</span>
             </div>
 
             {/* Metric 4 */}
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">New Posts</span>
-              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{stats.postsCount}</span>
+              <span className="text-2xl font-extrabold text-slate-900 mt-2 block">{analyticsData.postsCount}</span>
               <span className="text-[10px] text-slate-400 mt-1 block">Last 7 days social feed</span>
             </div>
           </div>
@@ -219,7 +312,7 @@ export default function AdminPage() {
           <div>
             <h3 className="text-base font-bold text-slate-900">Push In-App Announcement</h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Creates a network-wide notification row and broadcasts real-time to all verified members.
+              Creates a network or group notification row and broadcasts real-time to verified members.
             </p>
           </div>
 
@@ -236,6 +329,39 @@ export default function AdminPage() {
           )}
 
           <form onSubmit={handleSendAnnouncement} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 uppercase">Target Audience</label>
+                <select
+                  value={announceTargetType}
+                  onChange={(e) => setAnnounceTargetType(e.target.value as "NETWORK" | "GROUP")}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-brand-500"
+                >
+                  <option value="NETWORK">Entire Network</option>
+                  <option value="GROUP">Specific Group</option>
+                </select>
+              </div>
+
+              {announceTargetType === "GROUP" && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 uppercase">Target Group</label>
+                  <select
+                    value={announceGroupId || ""}
+                    onChange={(e) => setAnnounceGroupId(e.target.value || null)}
+                    required
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-brand-500"
+                  >
+                    <option value="">Select a group...</option>
+                    {groupsData?.data?.map((g: any) => (
+                      <option key={g.groupId} value={g.groupId}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 uppercase">Announcement Title</label>
               <input
@@ -292,6 +418,39 @@ export default function AdminPage() {
           )}
 
           <form onSubmit={handleSendNewsletter} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-700 uppercase">Target Audience</label>
+                <select
+                  value={newsTargetType}
+                  onChange={(e) => setNewsTargetType(e.target.value as "NETWORK" | "GROUP")}
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-brand-500"
+                >
+                  <option value="NETWORK">Entire Network</option>
+                  <option value="GROUP">Specific Group</option>
+                </select>
+              </div>
+
+              {newsTargetType === "GROUP" && (
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 uppercase">Target Group</label>
+                  <select
+                    value={newsGroupId || ""}
+                    onChange={(e) => setNewsGroupId(e.target.value || null)}
+                    required
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white text-slate-900 outline-none focus:border-brand-500"
+                  >
+                    <option value="">Select a group...</option>
+                    {groupsData?.data?.map((g: any) => (
+                      <option key={g.groupId} value={g.groupId}>
+                        {g.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-700 uppercase">Newsletter Subject</label>
               <input
@@ -326,6 +485,133 @@ export default function AdminPage() {
           </form>
         </div>
       </div>
+
+      {/* Super Admin Section */}
+      {isSuperAdmin && (
+        <div className="rounded-2xl border border-slate-200 bg-slate-950 p-6 shadow-sm text-white space-y-6">
+          <div>
+            <h3 className="text-lg font-bold">Super Admin Global Broadcast Panel</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Target multiple networks or groups globally. Recipient lists will be dynamically deduplicated across target categories.
+            </p>
+          </div>
+
+          {superStatus?.success && (
+            <div className="bg-emerald-950 border border-emerald-800 rounded-xl p-3 text-xs text-emerald-400">
+              Bulk broadcast request accepted and task queued!
+            </div>
+          )}
+
+          {superStatus?.error && (
+            <div className="bg-red-950 border border-red-800 rounded-xl p-3 text-xs text-red-400">
+              {superStatus.error}
+            </div>
+          )}
+
+          <form onSubmit={handleSuperBroadcast} className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Select Networks (Multi-select) */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">Target Networks</label>
+                <div className="border border-slate-800 rounded-xl p-3 max-h-[160px] overflow-y-auto space-y-2 bg-slate-900">
+                  {allNetworksData?.data?.map((net: any) => (
+                    <label key={net.networkId} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        value={net.networkId}
+                        checked={superSelectedNetworks.includes(net.networkId)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSuperSelectedNetworks([...superSelectedNetworks, net.networkId]);
+                          } else {
+                            setSuperSelectedNetworks(superSelectedNetworks.filter(id => id !== net.networkId));
+                          }
+                        }}
+                        className="rounded text-brand-600 border-slate-800 bg-slate-950"
+                      />
+                      {net.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Select Groups (Multi-select) */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wide">Target Groups</label>
+                <div className="border border-slate-800 rounded-xl p-3 max-h-[160px] overflow-y-auto space-y-2 bg-slate-900">
+                  {allGroupsData?.map((grp: any) => (
+                    <label key={grp.groupId} className="flex items-center gap-2 text-xs text-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        value={grp.groupId}
+                        checked={superSelectedGroups.includes(grp.groupId)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSuperSelectedGroups([...superSelectedGroups, grp.groupId]);
+                          } else {
+                            setSuperSelectedGroups(superSelectedGroups.filter(id => id !== grp.groupId));
+                          }
+                        }}
+                        className="rounded text-brand-600 border-slate-800 bg-slate-950"
+                      />
+                      {grp.name} <span className="text-[10px] text-slate-500 font-mono">({grp.networkId.slice(0, 4)})</span>
+                    </label>
+                  ))}
+                  {(!allGroupsData || allGroupsData.length === 0) && (
+                    <div className="text-slate-500 text-xs py-2 text-center">No groups available.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 uppercase">Broadcast Channel</label>
+                <select
+                  value={superBroadcastType}
+                  onChange={(e) => setSuperBroadcastType(e.target.value as "ANNOUNCEMENT" | "NEWSLETTER")}
+                  className="w-full rounded-xl border border-slate-800 px-3 py-2 text-sm bg-slate-900 text-white outline-none focus:border-brand-500"
+                >
+                  <option value="ANNOUNCEMENT">Push In-App Announcement</option>
+                  <option value="NEWSLETTER">Email Newsletter Broadcast</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-300 uppercase">Broadcast Title / Subject</label>
+                <input
+                  type="text"
+                  placeholder="Platform-wide alert..."
+                  value={superTitle}
+                  onChange={(e) => setSuperTitle(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-slate-800 px-3 py-2 text-sm bg-slate-900 text-white outline-none focus:border-brand-500"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-300 uppercase">Detailed Content Message</label>
+              <textarea
+                placeholder="Broadcast body details..."
+                rows={4}
+                value={superBody}
+                onChange={(e) => setSuperBody(e.target.value)}
+                required
+                className="w-full rounded-xl border border-slate-800 px-3 py-2.5 text-sm bg-slate-900 text-white outline-none focus:border-brand-500 resize-none"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={superBroadcastMutation.isPending}
+              className="w-full rounded-xl bg-brand-500 hover:bg-brand-600 py-3 text-xs font-bold text-white shadow transition-all disabled:opacity-50"
+            >
+              {superBroadcastMutation.isPending ? "Queuing Broadcast..." : "Submit Global Broadcast"}
+            </button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

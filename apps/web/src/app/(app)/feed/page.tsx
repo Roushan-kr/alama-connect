@@ -50,11 +50,30 @@ interface FeedPage {
 export default function FeedPage() {
   const queryClient = useQueryClient()
   const { accessToken, user } = useAuthStore()
-  const [newPostBody, setNewPostBody] = useState("")
-  const [newPostTitle, setNewPostTitle] = useState("")
+  
+  // Composer states
+  const [activeTab, setActiveTab] = useState<"post" | "job" | "announcement" | "newsletter">("post")
   const [postError, setPostError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null)
+
+  // 1. Social Post states
+  const [newPostTitle, setNewPostTitle] = useState("")
+  const [newPostBody, setNewPostBody] = useState("")
+  const [imageFiles, setImageFiles] = useState<File[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])
+
+  // 2. Job states
+  const [jobTitle, setJobTitle] = useState("")
+  const [jobDescription, setJobDescription] = useState("")
+  const [jobLocation, setJobLocation] = useState("")
+  const [jobApplyLink, setJobApplyLink] = useState("")
+  const [jobTags, setJobTags] = useState("")
+  const [jobExpiresAt, setJobExpiresAt] = useState("")
+
+  // 3. Announcement & Newsletter states
+  const [adminTitle, setAdminTitle] = useState("")
+  const [adminBody, setAdminBody] = useState("")
 
   const observerTarget = useRef<HTMLDivElement>(null)
 
@@ -73,6 +92,47 @@ export default function FeedPage() {
       getNextPageParam: (lastPage) => lastPage.meta.nextCursor,
       enabled: !!accessToken,
     })
+
+  // Load user profile to check admin status and get network memberships
+  const { data: profile } = useQuery<any>({
+    queryKey: ["profile-me"],
+    queryFn: () => apiRequest("/api/users/me", { token: accessToken }),
+    enabled: !!accessToken,
+  })
+
+  const myNetworkId = profile?.networkMemberships?.[0]?.networkId
+  const myMembership = profile?.networkMemberships?.[0]
+  const isAdmin = myMembership?.role === "ADMIN" || user?.globalRole === "SUPER_ADMIN"
+
+  // Image Upload helpers
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return
+    const files = Array.from(e.target.files)
+    if (imageFiles.length + files.length > 4) {
+      setPostError("Maximum 4 images per post")
+      return
+    }
+
+    const newFiles = [...imageFiles, ...files]
+    setImageFiles(newFiles)
+
+    const newPreviews = files.map((file) => URL.createObjectURL(file))
+    setImagePreviews([...imagePreviews, ...newPreviews])
+  }
+
+  const removeImage = (index: number) => {
+    const newFiles = [...imageFiles]
+    newFiles.splice(index, 1)
+    setImageFiles(newFiles)
+
+    const newPreviews = [...imagePreviews]
+    const preview = newPreviews[index]
+    if (preview) {
+      URL.revokeObjectURL(preview)
+    }
+    newPreviews.splice(index, 1)
+    setImagePreviews(newPreviews)
+  }
 
   // Infinite Scroll Observer
   useEffect(() => {
@@ -99,13 +159,16 @@ export default function FeedPage() {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  // Create Post Mutation
+  // Mutations
   const createPostMutation = useMutation({
-    mutationFn: (body: { body: string; title?: string; networkId: string }) => {
+    mutationFn: (payload: { body: string; title?: string; networkId: string; files: File[] }) => {
       const formData = new FormData()
-      formData.append("body", body.body)
-      if (body.title) formData.append("title", body.title)
-      formData.append("networkId", body.networkId)
+      formData.append("body", payload.body)
+      if (payload.title) formData.append("title", payload.title)
+      formData.append("networkId", payload.networkId)
+      payload.files.forEach((file) => {
+        formData.append("images", file)
+      })
       return apiRequest("/api/posts", {
         method: "POST",
         body: formData,
@@ -115,34 +178,128 @@ export default function FeedPage() {
     onSuccess: () => {
       setNewPostBody("")
       setNewPostTitle("")
+      setImageFiles([])
+      imagePreviews.forEach((url) => URL.revokeObjectURL(url))
+      setImagePreviews([])
       queryClient.invalidateQueries({ queryKey: ["feed"] })
     },
   })
 
-  const handleCreatePost = async (e: React.FormEvent) => {
+  const createJobMutation = useMutation({
+    mutationFn: (body: {
+      title: string
+      description: string
+      location: string
+      applyLink: string
+      tags: string[]
+      expiresAt: string
+      networkId: string
+    }) =>
+      apiRequest("/api/jobs", {
+        method: "POST",
+        body,
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      setJobTitle("")
+      setJobDescription("")
+      setJobLocation("")
+      setJobApplyLink("")
+      setJobTags("")
+      setJobExpiresAt("")
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
+    },
+  })
+
+  const createAnnouncementMutation = useMutation({
+    mutationFn: (body: { title: string; body: string; networkId: string }) =>
+      apiRequest("/api/admin/announcements", {
+        method: "POST",
+        body,
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      setAdminTitle("")
+      setAdminBody("")
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
+    },
+  })
+
+  const createNewsletterMutation = useMutation({
+    mutationFn: (body: { title: string; body: string; networkId: string }) =>
+      apiRequest("/api/admin/newsletters", {
+        method: "POST",
+        body,
+        token: accessToken,
+      }),
+    onSuccess: () => {
+      setAdminTitle("")
+      setAdminBody("")
+      queryClient.invalidateQueries({ queryKey: ["feed"] })
+    },
+  })
+
+  const handleCreateContent = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!newPostBody.trim() || !user) return
+    if (!accessToken || !user) return
+
+    if (!myNetworkId) {
+      setPostError("You must belong to a network to publish content.")
+      return
+    }
+
     setCreating(true)
     setPostError(null)
 
-    // Fetch user's first network membership from API or DB
     try {
-      const profileData: any = await apiRequest("/api/users/me", { token: accessToken })
-      const myNetworkId = profileData?.networkMemberships?.[0]?.networkId
-
-      if (!myNetworkId) {
-        setPostError("You must belong to a network to post.")
-        setCreating(false)
-        return
+      if (activeTab === "post") {
+        if (!newPostBody.trim()) return
+        await createPostMutation.mutateAsync({
+          body: newPostBody,
+          networkId: myNetworkId,
+          files: imageFiles,
+          ...(newPostTitle ? { title: newPostTitle } : {}),
+        })
+      } else if (activeTab === "job") {
+        if (!jobTitle.trim() || !jobDescription.trim() || !jobLocation.trim()) {
+          setPostError("Title, Description, and Location are required.")
+          setCreating(false)
+          return
+        }
+        await createJobMutation.mutateAsync({
+          title: jobTitle,
+          description: jobDescription,
+          location: jobLocation,
+          applyLink: jobApplyLink,
+          tags: jobTags ? jobTags.split(",").map((t) => t.trim()).filter(Boolean) : [],
+          expiresAt: jobExpiresAt ? new Date(jobExpiresAt).toISOString() : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+          networkId: myNetworkId,
+        })
+      } else if (activeTab === "announcement") {
+        if (!adminTitle.trim() || !adminBody.trim()) {
+          setPostError("Title and Body are required.")
+          setCreating(false)
+          return
+        }
+        await createAnnouncementMutation.mutateAsync({
+          title: adminTitle,
+          body: adminBody,
+          networkId: myNetworkId,
+        })
+      } else if (activeTab === "newsletter") {
+        if (!adminTitle.trim() || !adminBody.trim()) {
+          setPostError("Title and Body are required.")
+          setCreating(false)
+          return
+        }
+        await createNewsletterMutation.mutateAsync({
+          title: adminTitle,
+          body: adminBody,
+          networkId: myNetworkId,
+        })
       }
-
-      await createPostMutation.mutateAsync({
-        body: newPostBody,
-        networkId: myNetworkId,
-        ...(newPostTitle ? { title: newPostTitle } : {}),
-      })
-    } catch (err) {
-      setPostError("Failed to publish post")
+    } catch (err: any) {
+      setPostError(err.message || "Failed to publish content")
     } finally {
       setCreating(false)
     }
@@ -162,38 +319,237 @@ export default function FeedPage() {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-      {/* Left Columns - Posts List & Infinite Scroll */}
+      {/* Left Columns - Feed & Composer */}
       <div className="md:col-span-2 space-y-6">
-        {/* Create Post Card */}
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-800 mb-4">Share with your network</h2>
-          {postError && <p className="text-xs text-red-600 mb-2">{postError}</p>}
-          <form onSubmit={handleCreatePost} className="space-y-3">
-            <input
-              type="text"
-              placeholder="Title (optional)"
-              value={newPostTitle}
-              onChange={(e) => setNewPostTitle(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-brand-500"
-            />
-            <textarea
-              placeholder="What is on your mind?"
-              rows={3}
-              value={newPostBody}
-              onChange={(e) => setNewPostBody(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none focus:border-brand-500 resize-none"
-              required
-            />
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={creating}
-                className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50"
-              >
-                {creating ? "Publishing…" : "Publish Post"}
-              </button>
-            </div>
-          </form>
+        {/* Dynamic Composer Card */}
+        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden transition-all duration-300 hover:shadow-md">
+          {/* Tab Navigation */}
+          <div className="flex border-b border-slate-100 bg-slate-50/50 p-1">
+            <button
+              onClick={() => {
+                setActiveTab("post")
+                setPostError(null)
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-semibold rounded-xl tracking-wide uppercase transition-all duration-200 ${
+                activeTab === "post"
+                  ? "bg-white text-brand-600 shadow-sm border border-slate-200/40"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/60"
+              }`}
+            >
+              <span>📝</span> Post
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("job")
+                setPostError(null)
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-semibold rounded-xl tracking-wide uppercase transition-all duration-200 ${
+                activeTab === "job"
+                  ? "bg-white text-brand-600 shadow-sm border border-slate-200/40"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/60"
+              }`}
+            >
+              <span>💼</span> Job
+            </button>
+            {isAdmin && (
+              <>
+                <button
+                  onClick={() => {
+                    setActiveTab("announcement")
+                    setPostError(null)
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-semibold rounded-xl tracking-wide uppercase transition-all duration-200 ${
+                    activeTab === "announcement"
+                      ? "bg-white text-brand-600 shadow-sm border border-slate-200/40"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/60"
+                  }`}
+                >
+                  <span>📢</span> Announce
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab("newsletter")
+                    setPostError(null)
+                  }}
+                  className={`flex-1 flex items-center justify-center gap-2 py-3 text-xs font-semibold rounded-xl tracking-wide uppercase transition-all duration-200 ${
+                    activeTab === "newsletter"
+                      ? "bg-white text-brand-600 shadow-sm border border-slate-200/40"
+                      : "text-slate-500 hover:text-slate-800 hover:bg-slate-100/60"
+                  }`}
+                >
+                  <span>✉️</span> Newsletter
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Composer Body */}
+          <div className="p-6">
+            {postError && (
+              <div className="p-3 mb-4 rounded-xl bg-red-50 border border-red-100 text-xs text-red-600 font-medium">
+                ⚠️ {postError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateContent} className="space-y-4">
+              {activeTab === "post" && (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Title (optional)"
+                    value={newPostTitle}
+                    onChange={(e) => setNewPostTitle(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                  />
+                  <textarea
+                    placeholder="What is on your mind?"
+                    rows={4}
+                    value={newPostBody}
+                    onChange={(e) => setNewPostBody(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500 resize-none transition-all placeholder:text-slate-400"
+                    required
+                  />
+
+                  {/* Image Uploader & Preview Grid */}
+                  <div className="space-y-2">
+                    {imagePreviews.length > 0 && (
+                      <div className="grid grid-cols-4 gap-2">
+                        {imagePreviews.map((preview, index) => (
+                          <div key={index} className="relative aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-50 shadow-sm">
+                            <img src={preview} alt="Attachment preview" className="h-full w-full object-cover" />
+                            <button
+                              type="button"
+                              onClick={() => removeImage(index)}
+                              className="absolute top-1 right-1 h-5 w-5 bg-slate-900/70 hover:bg-slate-900 text-white rounded-full flex items-center justify-center text-[10px] transition-all"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {imageFiles.length < 4 && (
+                      <label className="flex flex-col items-center justify-center w-full h-16 border border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-50 transition-all duration-200">
+                        <div className="flex items-center gap-2 text-slate-500 hover:text-slate-800">
+                          <span className="text-sm">📸</span>
+                          <span className="text-xs font-medium">Attach images (Max 4, PNG/JPG)</span>
+                        </div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={handleImageChange}
+                          className="hidden"
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "job" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <input
+                      type="text"
+                      placeholder="Job Title (e.g. Lead React Developer)"
+                      value={jobTitle}
+                      onChange={(e) => setJobTitle(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                      required
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <textarea
+                      placeholder="Job Description and requirements..."
+                      rows={4}
+                      value={jobDescription}
+                      onChange={(e) => setJobDescription(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500 resize-none transition-all placeholder:text-slate-400"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Location (e.g. Remote / Chicago, IL)"
+                      value={jobLocation}
+                      onChange={(e) => setJobLocation(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="url"
+                      placeholder="Apply Link (URL)"
+                      value={jobApplyLink}
+                      onChange={(e) => setJobApplyLink(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="text"
+                      placeholder="Tags (comma separated, e.g. remote, nextjs)"
+                      value={jobTags}
+                      onChange={(e) => setJobTags(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                    />
+                  </div>
+                  <div>
+                    <input
+                      type="date"
+                      placeholder="Expiration Date"
+                      value={jobExpiresAt}
+                      onChange={(e) => setJobExpiresAt(e.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-700 bg-white outline-none focus:border-brand-500 transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {(activeTab === "announcement" || activeTab === "newsletter") && (
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder={`${activeTab === "announcement" ? "Announcement" : "Newsletter"} Title`}
+                    value={adminTitle}
+                    onChange={(e) => setAdminTitle(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-brand-500 transition-all placeholder:text-slate-400"
+                    required
+                  />
+                  <textarea
+                    placeholder="Write your content body here..."
+                    rows={5}
+                    value={adminBody}
+                    onChange={(e) => setNewPostBody(e.target.value)} // compatibility
+                    onInput={(e: any) => setAdminBody(e.target.value)}
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 outline-none focus:border-brand-500 resize-none transition-all placeholder:text-slate-400"
+                    required
+                  />
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={creating}
+                  className="rounded-xl bg-brand-600 hover:bg-brand-700 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-white shadow-sm disabled:opacity-50 flex items-center gap-1.5 transition-all duration-150 active:scale-[0.98]"
+                >
+                  {creating ? (
+                    <>
+                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      <span>Publishing…</span>
+                    </>
+                  ) : (
+                    `Publish ${activeTab}`
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
 
         {/* Feed List */}
@@ -212,11 +568,21 @@ export default function FeedPage() {
               .map((post) => (
                 <div
                   key={post.contentId}
-                  className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm relative"
+                  className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm relative transition-all hover:shadow-md"
                 >
                   {/* Content Type Badge */}
                   <div className="absolute right-6 top-6">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                    <span
+                      className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border tracking-wider ${
+                        post.contentType === "JOB"
+                          ? "bg-emerald-50 border-emerald-100 text-emerald-700"
+                          : post.contentType === "ANNOUNCEMENT"
+                          ? "bg-amber-50 border-amber-100 text-amber-700"
+                          : post.contentType === "NEWSLETTER"
+                          ? "bg-purple-50 border-purple-100 text-purple-700"
+                          : "bg-slate-50 border-slate-100 text-slate-500"
+                      }`}
+                    >
                       {post.contentType}
                     </span>
                   </div>
@@ -239,12 +605,43 @@ export default function FeedPage() {
                   {/* Card Body */}
                   <div className="mt-4 space-y-2">
                     {post.title && (
-                      <h4 className="text-base font-semibold text-slate-900">{post.title}</h4>
+                      <h4 className="text-base font-bold text-slate-900">{post.title}</h4>
                     )}
                     <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                       {post.body}
                     </p>
                   </div>
+
+                  {/* Render Custom Job Layout Detail Box */}
+                  {post.contentType === "JOB" && (
+                    <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="space-y-1 text-xs text-slate-600">
+                        {post.meta?.location && (
+                          <div className="flex items-center gap-1.5 font-medium text-slate-800">
+                            <span>📍 Location:</span>
+                            <span>{post.meta.location}</span>
+                          </div>
+                        )}
+                        {post.meta?.expiresAt && (
+                          <div className="text-[10px] text-slate-400">
+                            Deadline: {new Date(post.meta.expiresAt).toLocaleDateString()}
+                          </div>
+                        )}
+                      </div>
+                      {post.meta?.applyLink && (
+                        <div>
+                          <a
+                            href={post.meta.applyLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition-all shadow-sm active:scale-[0.98]"
+                          >
+                            Apply Now ↗
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Render Post Media Images */}
                   {post.media.length > 0 && (

@@ -57,8 +57,10 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const { body, token, headers: extraHeaders, ...init } = options;
 
+  const isFormData = body !== null && typeof body === "object" && typeof (body as any).append === "function";
+
   const headers = new Headers(extraHeaders);
-  if (body !== undefined && !(body instanceof FormData)) {
+  if (body !== undefined && !isFormData) {
     headers.set("Content-Type", "application/json");
   }
 
@@ -76,7 +78,7 @@ export async function apiRequest<T>(
   };
   
   if (body !== undefined) {
-    fetchOptions.body = body instanceof FormData ? body : JSON.stringify(body);
+    fetchOptions.body = isFormData ? (body as any) : JSON.stringify(body);
   }
 
   const res = await fetch(`${API_BASE}${path}`, fetchOptions);

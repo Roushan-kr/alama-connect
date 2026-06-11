@@ -39,14 +39,25 @@ export async function createAnnouncement(
 ) {
   await verifyAdmin(adminUserId, data.networkId);
 
+  if (data.groupId) {
+    const group = await db.group.findUnique({
+      where: { groupId: data.groupId },
+      select: { networkId: true },
+    });
+    if (!group || group.networkId !== data.networkId) {
+      throw new Error("Invalid group: Group does not belong to the selected network");
+    }
+  }
+
   const announcement = await db.content.create({
     data: {
       networkId: data.networkId,
+      groupId: data.groupId ?? null,
       contentType: ContentType.ANNOUNCEMENT,
       title: data.title,
       body: data.body,
       createdBy: adminUserId,
-      visibility: ContentVisibility.NETWORK,
+      visibility: data.groupId ? ContentVisibility.GROUP : ContentVisibility.NETWORK,
     },
   });
 
@@ -56,6 +67,7 @@ export async function createAnnouncement(
     networkId: data.networkId,
     title: data.title,
     message: data.body.substring(0, 100) + (data.body.length > 100 ? "..." : ""),
+    ...(data.groupId ? { groupId: data.groupId } : {}),
   });
 
   return announcement;
@@ -70,14 +82,25 @@ export async function createNewsletter(
 ) {
   await verifyAdmin(adminUserId, data.networkId);
 
+  if (data.groupId) {
+    const group = await db.group.findUnique({
+      where: { groupId: data.groupId },
+      select: { networkId: true },
+    });
+    if (!group || group.networkId !== data.networkId) {
+      throw new Error("Invalid group: Group does not belong to the selected network");
+    }
+  }
+
   const newsletter = await db.content.create({
     data: {
       networkId: data.networkId,
+      groupId: data.groupId ?? null,
       contentType: ContentType.NEWSLETTER,
       title: data.title,
       body: data.body,
       createdBy: adminUserId,
-      visibility: ContentVisibility.NETWORK,
+      visibility: data.groupId ? ContentVisibility.GROUP : ContentVisibility.NETWORK,
     },
   });
 
@@ -87,6 +110,7 @@ export async function createNewsletter(
     networkId: data.networkId,
     title: data.title,
     body: data.body,
+    ...(data.groupId ? { groupId: data.groupId } : {}),
   });
 
   return newsletter;

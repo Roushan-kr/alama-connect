@@ -54,6 +54,7 @@ export default function SearchPage() {
   }, [profile, selectedNetworkId]);
 
   // Fetch search results
+  // Fetch search results
   const { data, isLoading, error } = useQuery<SearchResponse>({
     queryKey: ["search", debouncedQ, selectedType, selectedNetworkId],
     queryFn: () =>
@@ -63,6 +64,10 @@ export default function SearchPage() {
       ),
     enabled: !!accessToken && debouncedQ.length >= 2 && !!selectedNetworkId,
   });
+
+  const searchResults: SearchResultItem[] = Array.isArray(data)
+    ? data
+    : (data as any)?.data || [];
 
   const currentNetworkName =
     userNetworks.find((n) => n.networkId === selectedNetworkId)?.network?.name || "your network";
@@ -166,7 +171,7 @@ export default function SearchPage() {
             <p className="text-sm font-semibold">Search failed</p>
             <p className="text-xs mt-1">Make sure you are connected to the network and try again.</p>
           </div>
-        ) : !data || data.data.length === 0 ? (
+        ) : searchResults.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center">
             <h3 className="text-sm font-semibold text-slate-800">No results found</h3>
             <p className="text-xs text-slate-500 mt-1">
@@ -175,7 +180,7 @@ export default function SearchPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {data.data.map((item) => (
+            {searchResults.map((item) => (
               <div
                 key={item.id}
                 className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
