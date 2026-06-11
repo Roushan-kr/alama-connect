@@ -4,7 +4,7 @@
 
 import { db } from "@/config/db.js";
 import { createInAppNotification } from "@/tasks/notification.tasks.js";
-import { ConnectionStatus } from "@prisma/client";
+import { ConnectionStatus, Prisma } from "@prisma/client";
 
 /**
  * Send a connection request from fromUserId to toUserId.
@@ -264,3 +264,186 @@ export async function removeConnection(userId: string, targetUserId: string) {
 
   return { success: true };
 }
+
+/**
+ * Discover other verified members of the user's institutional networks.
+ */
+export async function discoverPeers(
+  userId: string,
+  networkId?: string,
+  limit: number = 20,
+  cursor?: string,
+  q?: string
+) {
+  // Cap the limit to a maximum of 50 to prevent heavy resource usage
+  const safeLimit = Math.min(limit, 50);
+
+  // Fetch the user's verified network memberships
+  const memberships = await db.networkMember.findMany({
+    where: { userId, status: "VERIFIED" },
+    select: { networkId: true },
+  });
+
+  if (memberships.length === 0) {
+    return {
+      data: [],
+      nextCursor: undefined,
+      hasMore: false,
+    };
+  }
+
+  const targetNetworkIds = networkId ? [networkId] : memberships.map((m) => m.networkId);
+
+  // If a specific networkId is provided, verify the user is actually verified in it
+  if (networkId && !memberships.some((m) => m.networkId === networkId)) {
+    throw new Error("Unauthorized: You are not a verified member of this network");
+  }
+
+  // Find all active connections
+  const connections = await db.connection.findMany({
+    where: {
+      OR: [{ userA: userId }, { userB: userId }],
+    },
+    select: { userA: true, userB: true },
+  });
+  const connectedUserIds = connections.map((c) => (c.userA === userId ? c.userB : c.userA));
+
+  // Find pending incoming/outgoing connection requests
+  const pendingRequests = await db.connectionRequest.findMany({
+    where: {
+      OR: [{ fromUser: userId }, { toUser: userId }],
+      status: ConnectionStatus.PENDING,
+    },
+    select: { fromUser: true, toUser: true },
+  });
+  const pendingUserIds = pendingRequests.map((r) => (r.fromUser === userId ? r.toUser : r.fromUser));
+
+  // Build the list of excluded user IDs
+  const excludeUserIds = [userId, ...connectedUserIds, ...pendingUserIds];
+
+  // Construct the search and pagination filter query
+  const where: Prisma.NetworkMemberWhereInput = {
+    networkId: { in: targetNetworkIds },
+    status: "VERIFIED",
+    userId: { notIn: excludeUserIds },
+  };
+
+  // Add search filtering if a query is provided
+  if (q) {
+    const cleanQ = q.trim();
+    const num = parseInt(cleanQ, 10);
+    const batchSearch = !isNaN(num) ? [{ startYear: num }, { endYear: num }] : [];
+
+    where.user = {
+      OR: [
+        { username: { contains: cleanQ, mode: "insensitive" } },
+        {
+          profile: {
+            fullName: { contains: cleanQ, mode: "insensitive" },
+          },
+        },
+        {
+          profile: {
+            headline: { contains: cleanQ, mode: "insensitive" },
+          },
+        },
+        {
+          educations: {
+            some: {
+              OR: [
+                { degree: { contains: cleanQ, mode: "insensitive" } },
+                { field: { contains: cleanQ, mode: "insensitive" } },
+                ...batchSearch,
+              ],
+            },
+          },
+        },
+      ],
+    };
+  }
+
+  // Use Keyset pagination on userId
+  if (cursor) {
+    where.userId = {
+      ...(where.userId as object),
+      gt: cursor,
+    };
+  }
+
+  // Query verified NetworkMembers matching the network scope
+  const peers = await db.networkMember.findMany({
+    where,
+    orderBy: {
+      userId: "asc",
+    },
+    take: safeLimit + 1,
+    include: {
+      network: {
+        select: {
+          name: true,
+          code: true,
+        },
+      },
+      user: {
+        select: {
+          userId: true,
+          username: true,
+          profile: {
+            select: {
+              fullName: true,
+              headline: true,
+              profileImage: true,
+            },
+          },
+          followers: {
+            where: { followerId: userId },
+            select: { followerId: true },
+          },
+          educations: {
+            where: { networkId: { in: targetNetworkIds } },
+            select: {
+              degree: true,
+              field: true,
+              startYear: true,
+              endYear: true,
+            },
+            take: 1, // Primary education in the target network context
+          },
+        },
+      },
+    },
+  });
+
+  const hasMore = peers.length > safeLimit;
+  const items = peers.slice(0, safeLimit).map((p) => {
+    const primaryEdu = p.user.educations[0];
+    return {
+      userId: p.user.userId,
+      username: p.user.username,
+      profile: p.user.profile,
+      role: p.role, // NetworkRole (e.g. STUDENT, ALUMNI)
+      networkId: p.networkId,
+      networkName: p.network.name,
+      networkCode: p.network.code,
+      isFollowing: p.user.followers.length > 0,
+      education: primaryEdu
+        ? {
+            degree: primaryEdu.degree,
+            field: primaryEdu.field,
+            startYear: primaryEdu.startYear,
+            endYear: primaryEdu.endYear,
+          }
+        : null,
+    };
+  });
+
+  const lastItem = items[items.length - 1];
+  const nextCursor = hasMore && lastItem ? lastItem.userId : undefined;
+
+  return {
+    data: items,
+    nextCursor,
+    hasMore,
+  };
+}
+

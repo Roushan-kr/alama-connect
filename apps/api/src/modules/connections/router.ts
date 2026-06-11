@@ -8,6 +8,7 @@ import {
   SendConnectionRequestSchema,
   RespondConnectionRequestSchema,
   ListConnectionsSchema,
+  DiscoverPeersSchema,
 } from "./schemas.js";
 import {
   sendRequest,
@@ -15,13 +16,29 @@ import {
   listConnections,
   listPendingRequests,
   removeConnection,
+  discoverPeers,
 } from "./service.js";
 import { logger } from "@/config/logger.js";
+import { redis } from "@/config/redis.js";
+
 
 export const connectionsRouter: FastifyPluginAsync = async (fastify) => {
   // Send connection request
   fastify.post("/request", { preHandler: [requireAuth] }, async (request, reply) => {
     if (!request.user) return;
+
+    // Rate limit connection requests to 20 per hour
+    const rateLimitKey = `rl:connections:request:${request.user.userId}`;
+    const count = await redis.incr(rateLimitKey);
+    if (count === 1) {
+      await redis.expire(rateLimitKey, 3600);
+    }
+    if (count > 20) {
+      return reply.status(429).send({
+        error: "Connection request rate limit exceeded (20/hour). Please try again later.",
+        code: "RATE_LIMIT_EXCEEDED",
+      });
+    }
 
     const parsed = SendConnectionRequestSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -34,6 +51,32 @@ export const connectionsRouter: FastifyPluginAsync = async (fastify) => {
     try {
       const result = await sendRequest(request.user.userId, parsed.data.toUserId);
       return reply.status(201).send({ data: result });
+    } catch (err: unknown) {
+      return handleError(err, reply);
+    }
+  });
+
+  // Discover peers in the user's verified networks
+  fastify.get("/discover", { preHandler: [requireAuth] }, async (request, reply) => {
+    if (!request.user) return;
+
+    const parsed = DiscoverPeersSchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.status(400).send({
+        error: parsed.error.issues.map((i) => i.message).join(", "),
+        code: "VALIDATION_ERROR",
+      });
+    }
+
+    try {
+      const result = await discoverPeers(
+        request.user.userId,
+        parsed.data.networkId,
+        parsed.data.limit,
+        parsed.data.cursor,
+        parsed.data.q
+      );
+      return reply.status(200).send(result);
     } catch (err: unknown) {
       return handleError(err, reply);
     }

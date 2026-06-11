@@ -22,3 +22,13 @@ export const ListConnectionsSchema = z.object({
 });
 
 export type ListConnectionsQuery = z.infer<typeof ListConnectionsSchema>;
+
+export const DiscoverPeersSchema = z.object({
+  networkId: z.string().uuid("Invalid network ID format").optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().uuid("Invalid cursor format").optional(),
+  q: z.string().optional(),
+});
+
+export type DiscoverPeersQuery = z.infer<typeof DiscoverPeersSchema>;
+
