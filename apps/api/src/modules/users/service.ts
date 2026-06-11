@@ -446,10 +446,7 @@ export async function updateExperience(
   return toExperienceItem(row)
 }
 
-export async function deleteExperience(
-  userId: string,
-  expId: string,
-): Promise<void> {
+export async function deleteExperience(userId: string, expId: string): Promise<void> {
   const result = await db.workExperience.deleteMany({
     where: { expId, userId },
   })
@@ -490,10 +487,7 @@ export async function addSkill(
   return { skillId: skill.skillId, name: skill.name }
 }
 
-export async function removeSkill(
-  userId: string,
-  skillId: number,
-): Promise<void> {
+export async function removeSkill(userId: string, skillId: number): Promise<void> {
   const result = await db.userSkill.deleteMany({
     where: { userId, skillId },
   })

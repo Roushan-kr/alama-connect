@@ -1,57 +1,57 @@
-"use client";
+"use client"
 
-import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/api-client";
-import { useAuthStore } from "@/store/auth";
-import Link from "next/link";
+import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { apiRequest } from "@/lib/api-client"
+import { useAuthStore } from "@/store/auth"
+import Link from "next/link"
 
 interface SearchResultItem {
-  id: string;
-  type: "user" | "content" | "job";
-  title?: string | null;
-  body?: string | null;
-  createdAt: string;
-  rank: number;
-  metadata: Record<string, any>;
+  id: string
+  type: "user" | "content" | "job"
+  title?: string | null
+  body?: string | null
+  createdAt: string
+  rank: number
+  metadata: Record<string, any>
 }
 
 interface SearchResponse {
-  data: SearchResultItem[];
-  nextCursor?: string;
+  data: SearchResultItem[]
+  nextCursor?: string
 }
 
 export default function SearchPage() {
-  const { accessToken } = useAuthStore();
-  const [q, setQ] = useState("");
-  const [debouncedQ, setDebouncedQ] = useState("");
-  const [selectedType, setSelectedType] = useState<"all" | "users" | "content" | "jobs">("all");
-  const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null);
-  const [userNetworks, setUserNetworks] = useState<any[]>([]);
+  const { accessToken } = useAuthStore()
+  const [q, setQ] = useState("")
+  const [debouncedQ, setDebouncedQ] = useState("")
+  const [selectedType, setSelectedType] = useState<"all" | "users" | "content" | "jobs">("all")
+  const [selectedNetworkId, setSelectedNetworkId] = useState<string | null>(null)
+  const [userNetworks, setUserNetworks] = useState<any[]>([])
 
   // Debounce search query
   useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedQ(q);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [q]);
+      setDebouncedQ(q)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [q])
 
   // Load user profile & networks
   const { data: profile } = useQuery<any>({
     queryKey: ["profile-me"],
     queryFn: () => apiRequest("/api/users/me", { token: accessToken }),
     enabled: !!accessToken,
-  });
+  })
 
   useEffect(() => {
     if (profile?.networkMemberships) {
-      setUserNetworks(profile.networkMemberships);
+      setUserNetworks(profile.networkMemberships)
       if (profile.networkMemberships.length > 0 && !selectedNetworkId) {
-        setSelectedNetworkId(profile.networkMemberships[0].networkId);
+        setSelectedNetworkId(profile.networkMemberships[0].networkId)
       }
     }
-  }, [profile, selectedNetworkId]);
+  }, [profile, selectedNetworkId])
 
   // Fetch search results
   // Fetch search results
@@ -60,17 +60,15 @@ export default function SearchPage() {
     queryFn: () =>
       apiRequest<SearchResponse>(
         `/api/search?q=${encodeURIComponent(debouncedQ)}&networkId=${selectedNetworkId}&type=${selectedType}&limit=30`,
-        { token: accessToken }
+        { token: accessToken },
       ),
     enabled: !!accessToken && debouncedQ.length >= 2 && !!selectedNetworkId,
-  });
+  })
 
-  const searchResults: SearchResultItem[] = Array.isArray(data)
-    ? data
-    : (data as any)?.data || [];
+  const searchResults: SearchResultItem[] = Array.isArray(data) ? data : (data as any)?.data || []
 
   const currentNetworkName =
-    userNetworks.find((n) => n.networkId === selectedNetworkId)?.network?.name || "your network";
+    userNetworks.find((n) => n.networkId === selectedNetworkId)?.network?.name || "your network"
 
   return (
     <div className="space-y-8">
@@ -78,7 +76,8 @@ export default function SearchPage() {
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-bold tracking-tight text-slate-900 mb-2">Universal Search</h1>
         <p className="text-sm text-slate-500 mb-6">
-          Find peers, conversations, social posts, or career opportunities inside {currentNetworkName}.
+          Find peers, conversations, social posts, or career opportunities inside{" "}
+          {currentNetworkName}.
         </p>
 
         <div className="flex flex-col md:flex-row gap-4">
@@ -163,13 +162,18 @@ export default function SearchPage() {
         ) : isLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((n) => (
-              <div key={n} className="h-28 w-full animate-pulse rounded-2xl bg-white border border-slate-200" />
+              <div
+                key={n}
+                className="h-28 w-full animate-pulse rounded-2xl bg-white border border-slate-200"
+              />
             ))}
           </div>
         ) : error ? (
           <div className="rounded-2xl border border-red-100 bg-red-50 p-6 text-center text-red-700">
             <p className="text-sm font-semibold">Search failed</p>
-            <p className="text-xs mt-1">Make sure you are connected to the network and try again.</p>
+            <p className="text-xs mt-1">
+              Make sure you are connected to the network and try again.
+            </p>
           </div>
         ) : searchResults.length === 0 ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center">
@@ -193,14 +197,15 @@ export default function SearchPage() {
                         item.type === "user"
                           ? "bg-blue-50 border-blue-100 text-blue-700"
                           : item.type === "job"
-                          ? "bg-emerald-50 border-emerald-100 text-emerald-700"
-                          : "bg-purple-50 border-purple-100 text-purple-700"
+                            ? "bg-emerald-50 border-emerald-100 text-emerald-700"
+                            : "bg-purple-50 border-purple-100 text-purple-700"
                       }`}
                     >
                       {item.type}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      Score: {item.rank.toFixed(2)} • {new Date(item.createdAt).toLocaleDateString()}
+                      Score: {item.rank.toFixed(2)} •{" "}
+                      {new Date(item.createdAt).toLocaleDateString()}
                     </span>
                   </div>
 
@@ -222,9 +227,7 @@ export default function SearchPage() {
                   </h3>
 
                   {/* Body description */}
-                  <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
-                    {item.body}
-                  </p>
+                  <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">{item.body}</p>
 
                   {/* Metadata tags/location */}
                   {item.type === "job" && (
@@ -249,7 +252,8 @@ export default function SearchPage() {
 
                   {item.type === "content" && item.metadata.author && (
                     <span className="text-xs text-slate-500">
-                      Posted by {item.metadata.author.fullName || `@${item.metadata.author.username}`}
+                      Posted by{" "}
+                      {item.metadata.author.fullName || `@${item.metadata.author.username}`}
                     </span>
                   )}
                 </div>
@@ -287,5 +291,5 @@ export default function SearchPage() {
         )}
       </div>
     </div>
-  );
+  )
 }
