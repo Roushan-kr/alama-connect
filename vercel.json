@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "name": "campus-project",
+  "builds": [
+    {
+      "src": "apps/web/next.config.js",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "apps/api/**/*.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "^/api/(.*)",
+      "dest": "apps/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "apps/web/$1"
+    }
+  ],
+  "outputDirectory": ".vercel/output"
+}
